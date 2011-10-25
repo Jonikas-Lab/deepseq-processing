@@ -72,10 +72,10 @@ if __name__ == "__main__":
     parser.add_option('-T','--full_fastx_trimmer_options', metavar='"text"', default='-f 5',  
                       help="Full set of options to pass to fastx_trimmer, as a quoted string. Set to NONE to not run it."
                       +' For help on available options, run "fastx_trimmer -h" on the command-line. Default "%default".')
-    parser.add_option('-A','--full_cutadapt_options', metavar='"text"', default='-a GTTGGAACCAAT -e 0.1 -n 1 -m 20 -M 21', 
+    parser.add_option('-A','--full_cutadapt_options', metavar='"text"', 
+                      default='-a GTTGGAACCAAT -e 0.1 -O 10 -n 1 -m 20 -M 21', 
                       help="Full set of options to pass to cutadapt, as a quoted string. Set to NONE to not run it."
                       +' For help on available options (long), run "cutadapt -h" on the command-line. Default "%default".')
-    # TODO should I be using the -O LENGTH, --overlap=LENGTH cutadapt option?  Test!  Put in defaults if so.
     parser.add_option('-C','--collapse_to_unique', action="store_true", default=False, 
                       help="Run output through fastx_collapser to collapse all identical-sequence reads to unique ones. "
                       +"(converts fastq to fasta) (default %default).")

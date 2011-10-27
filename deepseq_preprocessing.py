@@ -26,8 +26,7 @@ def check_readlengths(infile, OUTFILE=None, printing=True, description=None):
     """ Make sure infile exists and is fa/fq (sys.exit if not); print read length distribution to OUTFILE and/or stdout.
     Return total number of reads. """
     if not os.path.exists(infile):    
-        sys.exit("No %s file found! Exiting program. You should examine and remove the intermediate files."%description)
-        # MAYBE-TODO should the intermediate files still be removed if exiting?
+        sys.exit("No %s file found! Exiting program. You should examine and/or remove the intermediate files."%description)
     read_length_data = read_length_distribution([infile],include_zeros=False,verbose=1,OUTPUT=None)
     if description is not None:     header = "# %s file (%s) data:"%(description, infile)
     else:                           header = "# %s file data:"%infile
@@ -83,7 +82,9 @@ if __name__ == "__main__":
                       help="Basename for the two outfiles (X.fa or X.fq, and X_info.txt). Default %default.")
     # MAYBE-TODO add options for commonly-used fastx_trimmer and cutadapt options (fastx_collapser doesn't have any); if I do that, make sure that for each wrapped program, either specific options OR the general option (-T/-A) is provided and used, NOT BOTH, and print the information for the user!
     parser.add_option('-k', '--keep_tmpfiles', action="store_true", default=False, 
-                      help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile).")
+                      help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile, "
+                      +"plus _tmp*; for exact names see full commands printed to stdout and info file).")
+    # MAYBE-TODO make option to generate and keep both the collapsed-to-unique file and the uncollapsed file?  That would be useful - may want it as a default.  Give them sensible names, like _full and _unique.
     parser.set_defaults(verbosity=1)
     parser.add_option('-q', '--quiet', action="store_const", const=1, dest='verbosity',
                       help="Only print commands and the output summary to STDOUT.")
@@ -96,6 +97,7 @@ if __name__ == "__main__":
     except ValueError:
         parser.print_help()
         sys.exit("Error: exactly one infile required!")
+    # MAYBE-TODO put outfile_basename as a positional argument instead of -o, so it's AFTER infile - confusing otherwise
     # MAYBE-TODO implement option with multiple infiles? Need to make sure they're the same fa/fq type etc...
 
     ### outfile and tmpfile names
@@ -173,7 +175,7 @@ if __name__ == "__main__":
         # MAYBE-TODO the read_length_distribution step etc should probably be optional, 
         #   since it's going to take extra time/cpu and the files may be large...  Make an option for that, implement.
         # To do things quickly, just use a single command with pipes, instead of multiple commands with intermediate files.
-        # MAYBE-TODO also maybe have an intermediate level where the output doesn't include 
+        # MAYBE-TODO also maybe have an intermediate level where the after-each-step check doesn't include 
         #   the whole read-length distribution but just the total read count?
 
     ### Remove tmpfiles

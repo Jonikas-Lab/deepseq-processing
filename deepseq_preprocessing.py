@@ -15,25 +15,29 @@ Output - there are actually two outfiles generated (with names based on the -o o
 
  -- Weronika Patena, Jonikas Lab, Carnegie Institution, Oct 2011
 
-USAGE: deepseq_preprocessing.py [options] infile """
+USAGE: deepseq_preprocessing.py [options] infile -o outfile_basename """
 
+# basic libraries
 import sys, os, subprocess
+# my modules
 from general_utilities import write_header_data
-from read_length_distribution import read_length_distribution
+from seq_count_and_lengths import seq_count_and_lengths
 
 
-def check_readlengths(infile, OUTFILE=None, printing=True, description=None):
-    """ Make sure infile exists and is fa/fq (sys.exit if not); print read length distribution to OUTFILE and/or stdout.
-    Return total number of reads. """
+def check_readcount(infile, OUTFILE=None, printing=True, description=None, 
+                    total_read_number_only=False, input_collapsed_to_unique=False):
+    """ Make sure infile exists and is fa/fq (sys.exit if not); print read count and length distribution 
+    to OUTFILE and/or stdout.  Return total number of reads. """
     if not os.path.exists(infile):    
-        sys.exit("No %s file found! Exiting program. You should examine and/or remove the intermediate files."%description)
-    read_length_data = read_length_distribution([infile],include_zeros=False,verbose=1,OUTPUT=None)
+        sys.exit("No %s file found! Exiting program. You should examine and/or remove the intermediate files."%infile)
+    read_count_data = seq_count_and_lengths([infile], total_read_number_only, input_collapsed_to_unique, 
+                                             include_zeros=False, verbosity=1, OUTPUT=None)
     if description is not None:     header = "# %s file (%s) data:"%(description, infile)
     else:                           header = "# %s file data:"%infile
-    output = "%s:\n%s"%(header, ''.join(read_length_data))
+    output = "%s:\n%s"%(header, ''.join(read_count_data))
     if OUTFILE is not None:     OUTFILE.write(output+'\n')
     if printing:                print output
-    read_count = int(read_length_data[-1].split(' ')[1])
+    read_count = int(read_count_data[-1].split(' ')[1])
     return read_count
 
 
@@ -63,11 +67,15 @@ def print_text_from_file(infile, OUTFILE=None, printing=True, add_newlines=0):
     return line_count
 
 
+# MAYBE-TODO write unit-tests?
+
+
 if __name__ == "__main__":
     """ Allows both running and importing of this file. """
 
     from optparse import OptionParser
     parser = OptionParser(__doc__)
+    ### wrapped program options
     parser.add_option('-T','--full_fastx_trimmer_options', metavar='"text"', default='-f 5',  
                       help="Full set of options to pass to fastx_trimmer, as a quoted string. Set to NONE to not run it."
                       +' For help on available options, run "fastx_trimmer -h" on the command-line. Default "%default".')
@@ -78,13 +86,21 @@ if __name__ == "__main__":
     parser.add_option('-C','--collapse_to_unique', action="store_true", default=False, 
                       help="Run output through fastx_collapser to collapse all identical-sequence reads to unique ones. "
                       +"(converts fastq to fasta) (default %default).")
+    # MAYBE-TODO add options for commonly-used fastx_trimmer and cutadapt options (fastx_collapser doesn't have any); if I do that, make sure that for each wrapped program, either specific options OR the general option (-T/-A) is provided and used, NOT BOTH, and print the information for the user!
+    ### input/output options
+    parser.add_option('-n','--total_read_number_only', action="store_true", default=False, 
+                      help="Only check the total read number after each step, not read length counts (default %default).")
+    parser.add_option('-u','--dont_check_uncollapsed_reads', action="store_true", default=False, 
+                      help="Don't check whether the read counts after fastx_collapser (uncollapsed based on header info) match the ones before (by default this check is done and prints a warning if failed, but it takes a while on long files).")
+    ### outfile options
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
                       help="Basename for the two outfiles (X.fa or X.fq, and X_info.txt). Default %default.")
-    # MAYBE-TODO add options for commonly-used fastx_trimmer and cutadapt options (fastx_collapser doesn't have any); if I do that, make sure that for each wrapped program, either specific options OR the general option (-T/-A) is provided and used, NOT BOTH, and print the information for the user!
     parser.add_option('-k', '--keep_tmpfiles', action="store_true", default=False, 
                       help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile, "
                       +"plus _tmp*; for exact names see full commands printed to stdout and info file).")
     # MAYBE-TODO make option to generate and keep both the collapsed-to-unique file and the uncollapsed file?  That would be useful - may want it as a default.  Give them sensible names, like _full and _unique.
+    # MAYBE-TODO the seq_count_and_lengths step etc could be optional, to speed things up - make option for that?  To do things quickly, use a single command with pipes, instead of multiple commands with intermediate files.
+    ### printing options
     parser.set_defaults(verbosity=1)
     parser.add_option('-q', '--quiet', action="store_const", const=1, dest='verbosity',
                       help="Only print commands and the output summary to STDOUT.")
@@ -97,7 +113,6 @@ if __name__ == "__main__":
     except ValueError:
         parser.print_help()
         sys.exit("Error: exactly one infile required!")
-    # MAYBE-TODO put outfile_basename as a positional argument instead of -o, so it's AFTER infile - confusing otherwise
     # MAYBE-TODO implement option with multiple infiles? Need to make sure they're the same fa/fq type etc...
 
     ### outfile and tmpfile names
@@ -117,22 +132,24 @@ if __name__ == "__main__":
         INFOFILE.write('\n')
 
         ### 1. look at the infile; make sure it's readable, etc
-        #       (read_length_distribution uses HTSeq and autodetects fa/fq format)
-        starting_readcount = check_readlengths(infile, INFOFILE, bool(options.verbosity>1), "original input")
+        #       (check_readcount uses seq_count_and_lengths, which uses HTSeq and autodetects fa/fq format)
+        starting_readcount = check_readcount(infile, INFOFILE, bool(options.verbosity>1), "original input", 
+                                             options.total_read_number_only, False)
 
         ### 2. run fastx_trimmer
         if options.full_fastx_trimmer_options == 'NONE':
-            if options.verbosity>0:   print "# Not running fastx_trimmer, since NONE was passed to -T."
+            if options.verbosity>0:   print "# Not running fastx_trimmer, since NONE was passed to -T option."
             tmpfile1 = infile
             trimmed_readcount = starting_readcount
         else:
             command = "fastx_trimmer %s -i %s -o %s"%(options.full_fastx_trimmer_options, infile, tmpfile1)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
-            trimmed_readcount = check_readlengths(tmpfile1, INFOFILE, bool(options.verbosity>1), "fastx_trimmer output")
+            trimmed_readcount = check_readcount(tmpfile1, INFOFILE, bool(options.verbosity>1), "fastx_trimmer output", 
+                                                options.total_read_number_only, False)
 
         ### 3. run cutadapt
         if options.full_cutadapt_options == 'NONE':
-            if options.verbosity>0:   print "# Not running cutadapt, since NONE was passed to -A."
+            if options.verbosity>0:   print "# Not running cutadapt, since NONE was passed to -A option."
             tmpfile2 = tmpfile1
             adapter_readcount = trimmed_readcount
         else:
@@ -141,7 +158,8 @@ if __name__ == "__main__":
             command = "cutadapt %s -o %s %s > %s"%(options.full_cutadapt_options, tmpfile2, tmpfile1, tmp_cutadapt_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_cutadapt_info, INFOFILE, bool(options.verbosity>1))
-            adapter_readcount = check_readlengths(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output")
+            adapter_readcount = check_readcount(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output", 
+                                                options.total_read_number_only, False)
 
         ### 4. run fastx_collapser
         if not options.collapse_to_unique:
@@ -154,7 +172,17 @@ if __name__ == "__main__":
             command = "fastx_collapser -v -i %s -o %s > %s"%(tmpfile2, outfile, tmp_collapser_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_collapser_info, INFOFILE, bool(options.verbosity>1), add_newlines=1)
-            collapsed_readcount = check_readlengths(outfile, INFOFILE, bool(options.verbosity>1), "fastx_collapser output")
+            collapsed_readcount = check_readcount(outfile, INFOFILE, bool(options.verbosity>1), "fastx_collapser output", 
+                                                  options.total_read_number_only, input_collapsed_to_unique=False)
+            # make sure uncollapsed readcount is the same as before collapsing
+            if not options.dont_check_uncollapsed_reads:
+                uncollapsed_readcount = check_readcount(outfile, None, False, "", True, input_collapsed_to_unique=True)
+                if not uncollapsed_readcount == adapter_readcount:
+                    text = "ERROR: the uncollapsed read-count after fastx_collapser isn't the same as the before-collapser count!  Collapsing went wrong somehow, or the way fastx_collapser works changed since this program was written?\n"
+                else:
+                    text = "(checked that all the reads are still there if you uncollapse the numbers using header info)\n"
+                print text
+                INFOFILE.write(text+'\n')
 
         final_output = ["### Final read count info\n"]
         final_output.append("# starting read count:   %s\n"%starting_readcount)
@@ -171,12 +199,6 @@ if __name__ == "__main__":
             INFOFILE.write(line)
             if options.verbosity>0:
                 print line,
-
-        # MAYBE-TODO the read_length_distribution step etc should probably be optional, 
-        #   since it's going to take extra time/cpu and the files may be large...  Make an option for that, implement.
-        # To do things quickly, just use a single command with pipes, instead of multiple commands with intermediate files.
-        # MAYBE-TODO also maybe have an intermediate level where the after-each-step check doesn't include 
-        #   the whole read-length distribution but just the total read count?
 
     ### Remove tmpfiles
     # need to use the tmpfile*_original names here because I do "tmpfile1 = infile" etc if skipping steps, 

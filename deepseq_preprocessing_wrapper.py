@@ -15,12 +15,12 @@ Output - there are actually two outfiles generated (with names based on the -o o
 
  -- Weronika Patena, Jonikas Lab, Carnegie Institution, Oct 2011
 
-USAGE: deepseq_preprocessing.py [options] infile -o outfile_basename """
+USAGE: deepseq_preprocessing_wrapper.py [options] infile -o outfile_basename """
 
 # basic libraries
-import sys, os, subprocess
+import sys, os
 # my modules
-from general_utilities import write_header_data
+from general_utilities import write_header_data, print_text_from_file, run_command_and_print_info
 from seq_count_and_lengths import seq_count_and_lengths
 
 
@@ -39,32 +39,6 @@ def check_readcount(infile, OUTFILE=None, printing=True, description=None,
     if printing:                print output
     read_count = int(read_count_data[-1].split(' ')[1])
     return read_count
-
-
-def run_command_and_print_info(command, LOGFILE=None, printing=True, shell=True, program_name=None):
-    """ Run command using subprocess.call; first print a line describing that to LOGFILE and/or stdout.
-    The shell arg to subprocess.call is given by shell; LOGFILE should be an open file object; 
-    program_name is only used for printing, and the first word of the command will be used by default. """
-    if program_name is None:
-        program_name = command.split(' ')[0]
-    output = "### Running %s: %s"%(program_name, command)
-    if LOGFILE is not None:     LOGFILE.write(output+'\n')
-    if printing:                print output
-    subprocess.call([command], shell=shell)
-
-
-def print_text_from_file(infile, OUTFILE=None, printing=True, add_newlines=0):
-    """ Write all text from infile to OUTFILE (if not None), also print to stdout if printing is set. 
-    Return line counts.  Infile should be a filename; OUTFILE should be an open file object. """
-    line_count = 0
-    for line in open(infile):
-        if OUTFILE is not None:     OUTFILE.write(line)
-        if printing:                print line,
-        line_count += 1
-    if add_newlines:
-        if OUTFILE is not None:     OUTFILE.write('\n'*add_newlines)
-        if printing:                print '\n'*add_newlines,
-    return line_count
 
 
 # MAYBE-TODO write unit-tests?
@@ -94,7 +68,7 @@ if __name__ == "__main__":
                       help="Don't check whether the read counts after fastx_collapser (uncollapsed based on header info) match the ones before (by default this check is done and prints a warning if failed, but it takes a while on long files).")
     ### outfile options
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
-                      help="Basename for the two outfiles (X.fa or X.fq, and X_info.txt). Default %default.")
+                      help="Basename for the two outfiles (which will be X.fa or X.fq, and X_info.txt). Default %default.")
     parser.add_option('-k', '--keep_tmpfiles', action="store_true", default=False, 
                       help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile, "
                       +"plus _tmp*; for exact names see full commands printed to stdout and info file).")

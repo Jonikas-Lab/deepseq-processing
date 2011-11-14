@@ -28,11 +28,13 @@ if __name__ == "__main__":
     parser = OptionParser(__doc__)
     parser.add_option('-B','--full_bowtie_options', metavar='"text"', default='-f -m1 -v1 -S --sam-nosq Chlre4nm_marker',  
                       help="Full set of options to pass to bowtie, as a quoted string. Set to NONE to not run it."
-                      +' For help on available options, run "bowtie -h" on the command-line. Default "%default".')
+                          +' For help on available options, run "bowtie -h" on the command-line. Default "%default".')
     # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed, index filename... --time option for bowtie to report how long stuff took...
     ### infile/outfile options
-    parser.add_option('-m','--input_metadata_file', metavar='FILE', default='', 
-                      help="Metadata file for the infile. Default: <infile_basename>_info.txt. Warning will be raised if not found. Pass NONE to not look for a metadata file at all.")
+    parser.add_option('-m','--input_metadata_file', metavar='FILE', default='AUTO', 
+                      help="Metadata file for the infile. Can be a filename, AUTO to infer from infile name "
+                          +"(<infile_basename>_info.txt), or NONE when there is no metadata file. "
+                          +"Unless the value is NONE, a warning will be raised if not found. Default: %default")
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
                       help="Basename for the two outfiles (which will be X.sam/X.map and X_info.txt). Default %default.")
     # MAYBE-TODO add an option to remove unaligned reads? (the unaligned read count will be kept in the metadata file)
@@ -84,7 +86,7 @@ if __name__ == "__main__":
         if options.input_metadata_file == 'NONE':
             INFOFILE.write('Not looking for a metadata input file, as specified by options\n')
         else:
-            if options.input_metadata_file == '':
+            if options.input_metadata_file == 'AUTO':
                 options.input_metadata_file = os.path.splitext(infile)[0] + '_info.txt'
                 text = 'Automatically determining metadata input file name: %s\n'%options.input_metadata_file
                 print text,

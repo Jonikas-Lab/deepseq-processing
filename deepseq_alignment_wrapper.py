@@ -26,7 +26,8 @@ if __name__ == "__main__":
 
     from optparse import OptionParser
     parser = OptionParser(__doc__)
-    parser.add_option('-B','--full_bowtie_options', metavar='"text"', default='-f -m1 -v1 -S --sam-nosq Chlre4nm_marker',  
+    parser.add_option('-B','--full_bowtie_options', metavar='"text"', 
+                      default='-f -m1 -v1 -S --sam-nosq Chlre4nm_cassette_new_m',  
                       help="Full set of options to pass to bowtie, as a quoted string. Set to NONE to not run it."
                           +' For help on available options, run "bowtie -h" on the command-line. Default "%default".')
     # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed, index filename... --time option for bowtie to report how long stuff took...

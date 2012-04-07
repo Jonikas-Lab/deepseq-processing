@@ -34,7 +34,7 @@ def check_readcount(infile, OUTFILE=None, printing=True, description=None,
                                              include_zeros=False, verbosity=1, OUTPUT=None)
     if description is not None:     header = "# %s file (%s) data:"%(description, infile)
     else:                           header = "# %s file data:"%infile
-    output = "%s:\n%s"%(header, ''.join(read_count_data))
+    output = "%s\n%s"%(header, ''.join(read_count_data))
     if OUTFILE is not None:     OUTFILE.write(output+'\n')
     if printing:                print output
     read_count = int(read_count_data[-1].split(' ')[1])
@@ -66,6 +66,8 @@ if __name__ == "__main__":
                       help="Only check the total read number after each step, not read length counts (default %default).")
     parser.add_option('-u','--dont_check_uncollapsed_reads', action="store_true", default=False, 
                       help="Don't check whether the read counts after fastx_collapser (uncollapsed based on header info) match the ones before (by default this check is done and prints a warning if failed, but it takes a while on long files).")
+    parser.add_option('-U','--never_check_readcounts_lengths', action="store_true", default=False, 
+                      help="Don't check file readcounts/lengths at any stage (to save time) - note that this means no by-stage readcount summary at the end! (default: do check)")
     ### outfile options
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
                       help="Basename for the two outfiles (which will be X.fa or X.fq, and X_info.txt). Default %default.")
@@ -107,8 +109,9 @@ if __name__ == "__main__":
 
         ### 1. look at the infile; make sure it's readable, etc
         #       (check_readcount uses seq_count_and_lengths, which uses HTSeq and autodetects fa/fq format)
-        starting_readcount = check_readcount(infile, INFOFILE, bool(options.verbosity>1), "original input", 
-                                             options.total_read_number_only, False)
+        if not options.never_check_readcounts_lengths:
+            starting_readcount = check_readcount(infile, INFOFILE, bool(options.verbosity>1), "original input", 
+                                                 options.total_read_number_only, False)
 
         ### 2. run fastx_trimmer
         if options.full_fastx_trimmer_options == 'NONE':
@@ -118,8 +121,10 @@ if __name__ == "__main__":
         else:
             command = "fastx_trimmer %s -i %s -o %s"%(options.full_fastx_trimmer_options, infile, tmpfile1)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
-            trimmed_readcount = check_readcount(tmpfile1, INFOFILE, bool(options.verbosity>1), "fastx_trimmer output", 
-                                                options.total_read_number_only, False)
+            if not options.never_check_readcounts_lengths:
+                trimmed_readcount = check_readcount(tmpfile1, INFOFILE, bool(options.verbosity>1), "fastx_trimmer output", 
+                                                    options.total_read_number_only, False)
+            else: INFOFILE.write('\n')
 
         ### 3. run cutadapt
         if options.full_cutadapt_options == 'NONE':
@@ -132,8 +137,9 @@ if __name__ == "__main__":
             command = "cutadapt %s -o %s %s > %s"%(options.full_cutadapt_options, tmpfile2, tmpfile1, tmp_cutadapt_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_cutadapt_info, INFOFILE, bool(options.verbosity>1))
-            adapter_readcount = check_readcount(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output", 
-                                                options.total_read_number_only, False)
+            if not options.never_check_readcounts_lengths:
+                adapter_readcount = check_readcount(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output", 
+                                                    options.total_read_number_only, False)
 
         ### 4. run fastx_collapser
         if not options.collapse_to_unique:
@@ -146,10 +152,11 @@ if __name__ == "__main__":
             command = "fastx_collapser -v -i %s -o %s > %s"%(tmpfile2, outfile, tmp_collapser_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_collapser_info, INFOFILE, bool(options.verbosity>1), add_newlines=1)
-            collapsed_readcount = check_readcount(outfile, INFOFILE, bool(options.verbosity>1), "fastx_collapser output", 
-                                                  options.total_read_number_only, input_collapsed_to_unique=False)
+            if not options.never_check_readcounts_lengths:
+                collapsed_readcount = check_readcount(outfile,INFOFILE,bool(options.verbosity>1),"fastx_collapser output", 
+                                                      options.total_read_number_only, input_collapsed_to_unique=False)
             # make sure uncollapsed readcount is the same as before collapsing
-            if not options.dont_check_uncollapsed_reads:
+            if not (options.never_check_readcounts_lengths or options.dont_check_uncollapsed_reads):
                 uncollapsed_readcount = check_readcount(outfile, None, False, "", True, input_collapsed_to_unique=True)
                 if not uncollapsed_readcount == adapter_readcount:
                     text = "ERROR: the uncollapsed read-count after fastx_collapser isn't the same as the before-collapser count!  Collapsing went wrong somehow, or the way fastx_collapser works changed since this program was written?\n"
@@ -158,21 +165,22 @@ if __name__ == "__main__":
                 print text
                 INFOFILE.write(text+'\n')
 
-        final_output = ["### Final read count info\n"]
-        final_output.append("# starting read count:   %s\n"%starting_readcount)
-        if not options.full_fastx_trimmer_options == 'NONE':
-            final_output.append("# read count after trimming:   %s\n"%trimmed_readcount)
-        if not options.full_cutadapt_options == 'NONE':
-            final_output.append("# read count after adapter stripping:   %s\n"%adapter_readcount)
-        discarded_readcount = starting_readcount-adapter_readcount
-        discarded_percent = 100*float(discarded_readcount)/starting_readcount
-        final_output.append("## reads removed:   %s  (%.0f%% of total)\n"%(discarded_readcount, discarded_percent))
-        if options.collapse_to_unique:
-            final_output.append("# read count after collapsing to unique sequences:   %s\n"%collapsed_readcount)
-        for line in final_output:
-            INFOFILE.write(line)
-            if options.verbosity>0:
-                print line,
+        if not options.never_check_readcounts_lengths:
+            final_output = ["### Final read count info\n"]
+            final_output.append("# starting read count:   %s\n"%starting_readcount)
+            if not options.full_fastx_trimmer_options == 'NONE':
+                final_output.append("# read count after trimming:   %s\n"%trimmed_readcount)
+            if not options.full_cutadapt_options == 'NONE':
+                final_output.append("# read count after adapter stripping:   %s\n"%adapter_readcount)
+            discarded_readcount = starting_readcount-adapter_readcount
+            discarded_percent = 100*float(discarded_readcount)/starting_readcount
+            final_output.append("## reads removed:   %s  (%.0f%% of total)\n"%(discarded_readcount, discarded_percent))
+            if options.collapse_to_unique:
+                final_output.append("# read count after collapsing to unique sequences:   %s\n"%collapsed_readcount)
+            for line in final_output:
+                INFOFILE.write(line)
+                if options.verbosity>0:
+                    print line,
 
     ### Remove tmpfiles
     # need to use the tmpfile*_original names here because I do "tmpfile1 = infile" etc if skipping steps, 

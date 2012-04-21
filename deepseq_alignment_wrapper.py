@@ -31,6 +31,8 @@ if __name__ == "__main__":
                       help="Full set of options to pass to bowtie, as a quoted string. Set to NONE to not run it."
                           +' For help on available options, run "bowtie -h" on the command-line. Default "%default".')
     # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed, index filename... --time option for bowtie to report how long stuff took...
+    # MAYBE-TODO should I use --strata in the default settings?  I.e. if a read aligns to some location with 0 mismatches and some with 1 mismatch, should it be discarded as a non-unique alignment, or kept as aligning uniquely to the 0-mismatch location?
+
     ### infile/outfile options
     parser.add_option('-m','--input_metadata_file', metavar='FILE', default='AUTO', 
                       help="Metadata file for the infile. Can be a filename, AUTO to infer from infile name "

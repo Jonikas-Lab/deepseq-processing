@@ -137,6 +137,8 @@ if __name__ == "__main__":
             command = "cutadapt %s -o %s %s > %s"%(options.full_cutadapt_options, tmpfile2, tmpfile1, tmp_cutadapt_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_cutadapt_info, INFOFILE, bool(options.verbosity>1))
+            # MAYBE-TODO instead of redirecting stdout to a tmpfile and then using print_text_from_file, 
+            #   I should probably be using subprocess.Popen.communicate function... Same in deepseq_alignment_wrapper.py
             if not options.never_check_readcounts_lengths:
                 adapter_readcount = check_readcount(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output", 
                                                     options.total_read_number_only, False)

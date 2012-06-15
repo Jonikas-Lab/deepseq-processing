@@ -24,6 +24,9 @@ from general_utilities import write_header_data, print_text_from_file, run_comma
 from seq_count_and_lengths import seq_count_and_lengths
 
 
+FASTQ_ENCODINGS_FASTX_TOOLKIT = {'auto': '', 'sanger': '-Q33', 'illumina': '-Q64'}
+
+
 def check_readcount(infile, OUTFILE=None, printing=True, description=None, 
                     total_read_number_only=False, input_collapsed_to_unique=False):
     """ Make sure infile exists and is fa/fq (sys.exit if not); print read count and length distribution 
@@ -60,6 +63,9 @@ if __name__ == "__main__":
     parser.add_option('-C','--collapse_to_unique', action="store_true", default=False, 
                       help="Run output through fastx_collapser to collapse all identical-sequence reads to unique ones. "
                       +"(converts fastq to fasta) (default %default).")
+    parser.add_option('-e','--fastq_encoding', type='choice', choices=FASTQ_ENCODINGS_FASTX_TOOLKIT.keys(), default='auto',
+                      metavar='|'.join(FASTQ_ENCODINGS_FASTX_TOOLKIT.keys()), 
+                      help="fastq quality encoding for fastx_toolkit (default %default).")
     # MAYBE-TODO add options for commonly-used fastx_trimmer and cutadapt options (fastx_collapser doesn't have any); if I do that, make sure that for each wrapped program, either specific options OR the general option (-T/-A) is provided and used, NOT BOTH, and print the information for the user!
     ### input/output options
     parser.add_option('-n','--total_read_number_only', action="store_true", default=False, 
@@ -119,7 +125,8 @@ if __name__ == "__main__":
             tmpfile1 = infile
             trimmed_readcount = starting_readcount
         else:
-            command = "fastx_trimmer %s -i %s -o %s"%(options.full_fastx_trimmer_options, infile, tmpfile1)
+            command = "fastx_trimmer %s %s -i %s -o %s"%(options.full_fastx_trimmer_options, 
+                                             FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], infile, tmpfile1)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             if not options.never_check_readcounts_lengths:
                 trimmed_readcount = check_readcount(tmpfile1, INFOFILE, bool(options.verbosity>1), "fastx_trimmer output", 
@@ -151,7 +158,8 @@ if __name__ == "__main__":
             # Note for fastx_collapser, but also for the others - NONE is necessary here, can't just use '', because 
             #    fastx_collapser works fine with no options, so '' is a sensible input and can't be used to turn it off.
         else:
-            command = "fastx_collapser -v -i %s -o %s > %s"%(tmpfile2, outfile, tmp_collapser_info)
+            command = "fastx_collapser -v %s -i %s -o %s > %s"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
+                                                                tmpfile2, outfile, tmp_collapser_info)
             run_command_and_print_info(command, INFOFILE, bool(options.verbosity>0), shell=True)
             print_text_from_file(tmp_collapser_info, INFOFILE, bool(options.verbosity>1), add_newlines=1)
             if not options.never_check_readcounts_lengths:

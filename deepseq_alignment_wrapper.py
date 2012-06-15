@@ -26,12 +26,12 @@ if __name__ == "__main__":
 
     from optparse import OptionParser
     parser = OptionParser(__doc__)
-    parser.add_option('-B','--full_bowtie_options', metavar='"text"', 
-                      default='-f -m1 -v1 --best --tryhard -S --sam-nosq Chlre4nm_cassette-pMJ007-m',  
-                      help="Full set of options to pass to bowtie, as a quoted string. Set to NONE to not run it."
-                          +' For help on available options, run "bowtie -h" on the command-line. Default "%default".')
-    # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed, index filename... --time option for bowtie to report how long stuff took...
-    # MAYBE-TODO should I use --strata in the default settings?  I.e. if a read aligns to some location with 0 mismatches and some with 1 mismatch, should it be discarded as a non-unique alignment, or kept as aligning uniquely to the 0-mismatch location?
+    parser.add_option('-B','--full_bowtie_options', default='-f -m1 -v1 --strata --best --tryhard -S --sam-nosq',  
+                      metavar='"TEXT"', help="Full options to pass to bowtie, as a quoted string. Set to NONE to not run "
+                      +'bowtie. For help on available options, run "bowtie -h" on the command-line. Default "%default".')
+    parser.add_option('-I','--bowtie_index', metavar='BASENAME', default='Chlre4nm_cassette-pMJ013b',  
+                      help='Bowtie index. (for help, run "bowtie -h" on the command-line. Default %default.)')
+    # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed... --time option for bowtie to report how long stuff took...
 
     ### infile/outfile options
     parser.add_option('-m','--input_metadata_file', metavar='FILE', default='AUTO', 
@@ -74,7 +74,8 @@ if __name__ == "__main__":
         #   (bowtie actually prints the summary to stderr, not stdout, so I need to print it to stdout in case there's 
         #    an error, so I can see the error message!  Or I could try to detect whether there was an error or not
         #    based on the output contents, but that seems like unnecessary work.)
-        command = "bowtie %s %s %s 2> %s"%(options.full_bowtie_options, infile, outfile, tmp_bowtie_info)
+        command = "bowtie %s %s %s %s 2> %s"%(options.full_bowtie_options, options.bowtie_index,
+                                              infile, outfile, tmp_bowtie_info)
         run_command_and_print_info(command, INFOFILE, printing=True, shell=True)
         print_text_from_file(tmp_bowtie_info, INFOFILE, printing=True, add_newlines=1)
         # remove tmpfile

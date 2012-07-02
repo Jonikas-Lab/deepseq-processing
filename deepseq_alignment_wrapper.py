@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_option('-B','--full_bowtie_options', default='-f -m1 -v1 --strata --best --tryhard -S --sam-nosq',  
                       metavar='"TEXT"', help="Full options to pass to bowtie, as a quoted string. Set to NONE to not run "
                       +'bowtie. For help on available options, run "bowtie -h" on the command-line. Default "%default".')
-    parser.add_option('-I','--bowtie_index', metavar='BASENAME', default='Chlre4nm_cassette-pMJ013b',  
+    parser.add_option('-I','--bowtie_index', metavar='BASENAME', default='Chlre4nm_chl-mit_cassette-pMJ013b',  
                       help='Bowtie index. (for help, run "bowtie -h" on the command-line. Default %default.)')
     # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed... --time option for bowtie to report how long stuff took...
 

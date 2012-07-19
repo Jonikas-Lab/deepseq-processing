@@ -21,7 +21,7 @@ USAGE: deepseq_preprocessing_wrapper.py [options] infile -o outfile_basename """
 import sys, os
 # my modules
 from general_utilities import write_header_data, print_text_from_file, run_command_and_print_info
-from seq_count_and_lengths import seq_count_and_lengths
+import seq_count_and_lengths
 
 
 FASTQ_ENCODINGS_FASTX_TOOLKIT = {'auto': '', 'sanger': '-Q33', 'illumina': '-Q64'}
@@ -33,8 +33,8 @@ def check_readcount(infile, OUTFILE=None, printing=True, description=None,
     to OUTFILE and/or stdout.  Return total number of reads. """
     if not os.path.exists(infile):    
         sys.exit("No %s file found! Exiting program. You should examine and/or remove the intermediate files."%infile)
-    read_count_data = seq_count_and_lengths([infile], total_read_number_only, input_collapsed_to_unique, 
-                                             include_zeros=False, verbosity=1, OUTPUT=None)
+    read_count_data = seq_count_and_lengths.main([infile], total_read_number_only, input_collapsed_to_unique, 
+                                                 include_zeros=False, verbosity=1, OUTPUT=None)[2]
     if description is not None:     header = "# %s file (%s) data:"%(description, infile)
     else:                           header = "# %s file data:"%infile
     output = "%s\n%s"%(header, ''.join(read_count_data))

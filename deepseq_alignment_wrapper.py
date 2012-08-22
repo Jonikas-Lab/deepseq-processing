@@ -40,7 +40,7 @@ if __name__ == "__main__":
                           +"Unless the value is NONE, a warning will be raised if not found. Default: %default")
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
                       help="Basename for the two outfiles (which will be X.sam/X.map and X_info.txt). Default %default.")
-    # MAYBE-TODO add an option to remove unaligned reads? (the unaligned read count will be kept in the metadata file)
+    # TODO add option (default behavior) to move the unaligned reads to a separate fasta file, so that we can analyze them separately later.  Whether they should also be kept in the sam file or not can be optional. 
     # MAYBE-TODO stdout verbosity levels?  Not really necessary, since I think I always want bowtie output printed to stdout - unless I end up doing read-count checks before and after too, then I may want those printed or not.
 
     try:

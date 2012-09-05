@@ -1,23 +1,38 @@
 #!/usr/bin/env python
-""" This is mostly a wrapper around fastq/fasta preprocessing utilities (cutadapt, fastx_collapser), that runs the programs on your input file and keeps track of read-counts and other metadata, saving it in a *_info.txt file.
+""" Preprocessing of insertional-mutant deepseq reads: strip adapter prefix and cassette sequence, filter by length, collapse to unique (all stages are optional and customizable). 
 
-Use the -T, -A, -C options to provide full option lists to each wrapped program - the option lists will be passed to the program with no parsing or changes except for specifying input/output files and possibly verbosity levels (the full command-lines, as ran, are printed to stdout).  I may add separate options for commonly used options of the wrapped programs in the future.
+1) Strip a given prefix sequence from each read; reads that didn't start with that prefix go in a separate file.
+Uses my own trim_prefix function (used to be done with fastx_trimmer, but that didn't check what the sequence was)
 
-Output - there are actually two outfiles generated (with names based on the -o option - calling the value X here):
-    - sequence file - <X>.fq or .fa, depending on input format etc - contains the sequences
+2) Strip the cassette sequence from middle/end of read, and grab only the remaining reads that are within the expected length range; reads that don't contain the cassette or are too short/long go in a separate file. 
+This is a wrapper around the cutadapt command-line program (or my modified version of it).
+
+3) Collapse identical read sequences to single reads (encoding the original readcount in the header) to avoid aligning the same sequence multiple times. This discards the quality info (i.e. converts file from fastq to fasta), if it hasn't been done earlier. 
+This is a wrapper around the fastx_collapser command-line program that does exactly that.
+
+My program keeps track of read-counts and metadata and saves it all in a metadata file.
+
+Output - there are actually four outfiles generated (with names based on the -o option - calling the value X here):
+    - sequence file - <X>.fq or .fa, depending on input format etc - contains the final sequences
+        after trimming the prefix, the cassette sequence (cutadapt) and collapsing to unique (fastx_collapser)
     - metadata file - <X>_info.txt - contains general information: 
         exact command used, date/time, system, user, etc
         read-length distribution before/after each step (may be optional), 
         summary output from the wrapped programs (normally printed to stdout), 
         sequence counts from each stage, with the total count/percentage of discarded sequences
-    - temporary/intermediate files - <X>_tmp* - contain intermediate sequence data, or output from wrapped programs.
+    - <X>_bad_prefix.fa - sequences that didn't start with the prefix sequence given in the -T option;
+        collapsed to unique if -C option.
+    - <X>_no_cassette.fa - sequences that didn't contain the cassette sequence given in the -A option;
+        collapsed to unique if -C option.
+    - temporary/intermediate files - <X>_tmp* - contain intermediate sequence data (after prefix-trimming but
+         before cassette-stripping, and after cassette-stripping but before collapsing to unique if -C option given).
         Removed after program finishes running with no errors, unless option -k is used.
 
- -- Weronika Patena, Jonikas Lab, Carnegie Institution, Oct 2011
+ -- Weronika Patena, Jonikas Lab, Carnegie Institution, 2011-2012
 
 USAGE: deepseq_preprocessing_wrapper.py [options] infile -o outfile_basename """
 
-# basic libraries
+# standard library
 from __future__ import division
 import sys, os
 # other packages

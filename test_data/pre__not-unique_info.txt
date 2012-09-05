@@ -1,0 +1,64 @@
+<REGEX># Command line this file was generated with: .*
+<REGEX># Path: .*
+<REGEX># Date: .*
+<REGEX># Full options: .*
+
+# original input file (test_data/INPUT_raw_fastq.fq) data:
+length	seq count
+22	2
+24	2
+30	3
+32	1
+36	1
+37	2
+45	1
+Total 12 seqs
+
+<REGEX>### Trimming ACTA from start of each sequence in .* \(output to .*, untrimmed to .*\)
+
+Trimmed sequences: 9 (75%)
+Untrimmed sequences: 3 (25%)
+
+<REGEX># first-base-trimming output file \(.*\) data:
+length	seq count
+20	2
+26	3
+32	1
+33	2
+41	1
+Total 9 seqs
+
+<REGEX>### Running cutadapt_mod: cutadapt_mod -a GTTGGAACCAAT -e 0.1 -O 10 -n 1 -m 20 -M 21 .*
+
+<REGEX>cutadapt version .*
+<REGEX>Command line parameters: -a GTTGGAACCAAT -e 0.1 -O 10 -n 1 -m 20 -M 21 .*
+Maximum error rate: 10.00%
+   Processed reads: 9
+     Trimmed reads: 6 ( 66.7%)
+   Too short reads: 2 ( 22.2% of processed reads)
+    Too long reads: 2 ( 22.2% of processed reads)
+<REGEX>\s* Total time: .*
+<REGEX>\s* Time per read: .*
+
+=== Adapter 1 ===
+
+Adapter 'GTTGGAACCAAT', length 12, was trimmed 6 times.
+
+Histogram of adapter lengths
+length	count
+12	6
+
+<REGEX># cutadapt output file \(.*\) data:
+length	seq count
+20	1
+21	2
+Total 3 seqs
+
+<REGEX>### Final read count info for .* \(main output file .*\)
+# starting total read count:	12
+# "good" read count after start trimming (% of total):	9 (75%)
+#  "bad" read count (wrong-start) (% of total):	3 (25%)
+# "good" read count after cassette stripping (% of total, % of trimmed):	3 (25%, 33%)
+#  "bad" read count (no-cassette) (% of total, % of trimmed):	6 (50%, 67%)
+## final "good" reads (in main output file) (% of total):	3 (25%)
+## final "bad" reads (in _wrong-start and/or _no-cassette files) (% of total):	9 (75%)

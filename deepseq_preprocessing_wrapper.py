@@ -99,7 +99,7 @@ def trim_prefix(prefix_bases, infile, trimmed_outfile, wrong_prefix_outfile=os.d
     N_trimmed, N_untrimmed = 0, 0
     with open(trimmed_outfile, 'w') as TRIMMED_OUTFILE:
         with open(wrong_prefix_outfile, 'w') as WRONG_PREFIX_OUTFILE:
-            # MAYBE-TODO right now if wrong_prefix_outfile==None, /dev/null is used - it would be faster with a custom file-like object that doesn't do anything, see http://stackoverflow.com/questions/2929899/cross-platform-dev-null-in-python
+            # MAYBE-TODO right now if wrong_prefix_outfile==None, /dev/null is used - it would be faster with a custom file-like object that doesn't touch the OS, but I'm not sure how to write one so it can be opened!  See general_utilities.FAKE_OUTFILE for an already open one.
             name_seq_generator = name_seq_generator_from_fasta_fastq(infile, verbosity>1)
             for name,seq in name_seq_generator:
                 if_trimmed = _trim_prefix_single(name, seq, prefix_bases, TRIMMED_OUTFILE, WRONG_PREFIX_OUTFILE)

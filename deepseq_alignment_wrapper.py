@@ -40,8 +40,9 @@ if __name__ == "__main__":
                           +"Unless the value is NONE, a warning will be raised if not found. Default: %default")
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
                       help="Basename for the two outfiles (which will be X.sam/X.map and X_info.txt). Default %default.")
-    # TODO add option (default behavior) to move the unaligned reads to a separate fasta file, so that we can analyze them separately later.  Whether they should also be kept in the sam file or not can be optional. 
-    # MAYBE-TODO stdout verbosity levels?  Not really necessary, since I think I always want bowtie output printed to stdout - unless I end up doing read-count checks before and after too, then I may want those printed or not.
+    # TODO add option (default behavior) to move the unaligned reads to a separate fasta file, so that we can analyze them separately later (might be good to make them fasta).  Whether they should also be kept in the sam file or not can be optional. 
+    # TODO also treat multiple-aligned reads differently from unaligned!  May need to add postprocessing for this - see ../../TODOs_to_move_to_other_files.txt file for more notes.
+    # MAYBE-TODO stdout verbosity levels?  Not really necessary, since I think I always want bowtie output printed to stdout - unless I end up doing read-count checks before and after too, then I may want those printed or not.  Or if I'm doing run-tests, then I'll want a completely quiet option.
 
     try:
         (options, [infile]) = parser.parse_args()
@@ -107,5 +108,5 @@ if __name__ == "__main__":
         # MAYBE-TODO could actually parse input metadata file and make sure the number of reads found by bowtie matches the one reported at the end of the file, etc...
 
 
-# MAYBE-TODO write unit-tests?
+# MAYBE-TODO write run-tests?
 

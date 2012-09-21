@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """ This is mostly a wrapper around the bowtie alignment program, that also reads metadata from a preprocessing info file and adds more metadata to a new *_info.txt file.
 
+For bowtie help, run "bowtie -h" on the command-line.  The program uses -v mode.  Input file format determined based on extension.
+
 Use the -B option to provide a full bowtie option list - it will be passed to bowtie with no parsing or changes except for specifying input/output files and possibly verbosity levels (the full command-line, as ran, is printed to stdout).
 
 Output - there are actually two outfiles generated (with names based on the -o option - calling the value X here):
@@ -13,78 +15,137 @@ Output - there are actually two outfiles generated (with names based on the -o o
  -- Weronika Patena, Jonikas Lab, Carnegie Institution, Oct 2011
 
 USAGE: deepseq_alignment_wrapper.py [options] infile -o outfile_basename """
+# TODO update docstring!
 
-# basic libraries
+# standard library
+from __future__ import division
 import sys, os
+import unittest
+# other packages
 # my modules
-from general_utilities import write_header_data, print_text_from_file, run_command_and_print_info
+from general_utilities import write_header_data, print_text_from_file, run_command_print_info_output
+from seq_basic_utilities import check_fasta_fastq_format
 from seq_count_and_lengths import seq_count_and_lengths
 
 
-if __name__ == "__main__":
-    """ Allows both running and importing of this file. """
-
+def define_option_parser():
+    """ Populates and returns an optparse option parser object, with __doc__ as the usage string."""
     from optparse import OptionParser
     parser = OptionParser(__doc__)
-    parser.add_option('-B','--full_bowtie_options', default='-f -m1 -v1 --strata --best --tryhard -S --sam-nosq',  
-                      metavar='"TEXT"', help="Full options to pass to bowtie, as a quoted string. Set to NONE to not run "
-                      +'bowtie. For help on available options, run "bowtie -h" on the command-line. Default "%default".')
-    parser.add_option('-I','--bowtie_index', metavar='BASENAME', default='Chlre4nm_chl-mit_cassette-pMJ013b',  
-                      help='Bowtie index. (for help, run "bowtie -h" on the command-line. Default %default.)')
-    # MAYBE-TODO add options for commonly-used bowtie options; if I do that, make sure the specific options are merged sensibly with the general option (-B)!  Useful options: input type (fasta/fastq), output type (SAM/native), N mismatches allowed... --time option for bowtie to report how long stuff took...
+
+    ### test options
+    parser.add_option('-t','--test_functionality', action='store_true', default=False, 
+                      help="Run the built-in unit test suite (ignores all other options/arguments; default %default).")
+    parser.add_option('-T','--test_run', action='store_true', default=False, 
+                      help="Run on a test input file, check output against reference files. "
+                          + "Ignores all other options/arguments. (default %default).")
+
+    ### functionality options
+    parser.add_option('-G','--genome_bowtie_index', metavar='BASENAME', default='Chlre4nm_chl-mit',  
+                      help='Bowtie index file set to use for the genome (or everything combined). Default %default.')
+    parser.add_option('-C','--cassette_bowtie_index', metavar='BASENAME', default='cassette-pMJ013b',  
+                      help="Bowtie index file set to use for the insertion cassette; NONE to only use the index from -G. "
+                      +"Default %default.")
+    parser.add_option('-e','--allowed_errors', type='int', metavar='N', default=1,  
+                      help='How many mismatches to allow in alignments (bowtie -v option); max 3. Default %default.')
+    parser.add_option('-m','--multiple_to_show', type='int', metavar='N', default=10,  
+                      help='How many multiple alignments to show (bowtie -m option); -1 = no limit. Default %default.')
+    parser.add_option('-B','--other_bowtie_options',default='--strata --best --tryhard -S --sam-nosq', metavar='"TEXT"',
+                      help="Remaining options to pass to bowtie, as a quoted string (-m and -v will be stripped - "
+                      + " specify them separately as -m and -e).  Default \"%default\".")
 
     ### infile/outfile options
-    parser.add_option('-m','--input_metadata_file', metavar='FILE', default='AUTO', 
+    parser.add_option('-f','--input_metadata_file', metavar='FILE', default='AUTO', 
                       help="Metadata file for the infile. Can be a filename, AUTO to infer from infile name "
                           +"(<infile_basename>_info.txt), or NONE when there is no metadata file. "
                           +"Unless the value is NONE, a warning will be raised if not found. Default: %default")
     parser.add_option('-o','--outfile_basename', metavar='X', default='test', 
-                      help="Basename for the two outfiles (which will be X.sam/X.map and X_info.txt). Default %default.")
-    # TODO add option (default behavior) to move the unaligned reads to a separate fasta file, so that we can analyze them separately later (might be good to make them fasta).  Whether they should also be kept in the sam file or not can be optional. 
-    # TODO also treat multiple-aligned reads differently from unaligned!  May need to add postprocessing for this - see ../../TODOs_to_move_to_other_files.txt file for more notes.
+                      help="Basename for the outfiles (suffixes will vary). Default %default.")
+    parser.add_option('-s','--dont_split_by_category', action='store_true', default=False, 
+                      help="Don't split the output file into unaligned, multiple, cassette and unique-genome. "
+                      +"Default %default.")
     # MAYBE-TODO stdout verbosity levels?  Not really necessary, since I think I always want bowtie output printed to stdout - unless I end up doing read-count checks before and after too, then I may want those printed or not.  Or if I'm doing run-tests, then I'll want a completely quiet option.
 
+    return parser
+
+
+def main(args, options):
+    """ Run the main functionality of the module (see module docstring for more information), excluding testing.
+    The options argument should be generated by an optparse parser.
+    """
+
     try:
-        (options, [infile]) = parser.parse_args()
+        [infile] = args
     except ValueError:
         parser.print_help()
         sys.exit("Error: exactly one infile required!")
-        # bowtie could take multiple infiles, but then I'd have to deal with multiple preprocessing metafiles, no thanks!
+        # MAYBE-TODO bowtie could take multiple infiles, but then I'd have to deal with multiple preprocessing metafiles...
 
-    ### outfile and tmpfile names
-    outfile_suffix = '.sam' if any([x in options.full_bowtie_options for x in ['-S','--sam']]) else '.map'
-    outfile = options.outfile_basename + outfile_suffix
+    other_bowtie_options_split = options.other_bowtie_options.split(' ')
+    if any([x in other_bowtie_options_split for x in ('-v -e --maqerr -n --seedmms -l --seedlen'.split(' '))]):
+        raise Exception("Cannot include -v/-n/-e and related bowtie options in -B!  Use separate -e option for that; "
+                        "note that this program allows -v bowtie mode only.")
+    if any([x in other_bowtie_options_split for x in ('-m -k -a --all'.split(' '))]):
+        raise Exception("Cannot include -m/-a bowtie options in -B!  Use separate -m option for that.")
+
+    specific_bowtie_options = '-v %s'%options.allowed_errors
+    if not any([x in options.other_bowtie_options for x in ('-f', '-q')]):
+        infile_format = check_fasta_fastq_format(infile)
+        if infile_format=='fasta':      specific_bowtie_options += ' -f'
+        elif infile_format=='fastq':    specific_bowtie_options += ' -q'
+        else:                           raise Exception("Cannot process auto-detected infile format %s!"%infile_format)
+
+    if options.multiple_to_show == -1:  multiple_bowtie_option = '-a' 
+    elif options.multiple_to_show == 0: multiple_bowtie_option = '-k 1' 
+    else:                               multiple_bowtie_option = '-k %s'%options.multiple_to_show
+
+    # output file names: temporary for alignments, final (split or all), metadata info file. 
+    outfile_suffix = '.sam' if any([x in options.other_bowtie_options for x in ['-S','--sam']]) else '.map'
+    tmpfile_genome = 'tmp_' + options.outfile_basename + '_genome' + outfile_suffix
+    if options.cassette_bowtie_index != 'NONE':
+        tmpfile_cassette = 'tmp_' + options.outfile_basename + '_cassette' + outfile_suffix
+    if options.dont_split_by_category:
+        outfile_all = options.outfile_basename + outfile_suffix
+    else:
+        outfile_unaligned = options.outfile_basename + '_unaligned.fa'
+        outfile_cassette = options.outfile_basename + '_cassette' + outfile_suffix
+        outfile_genomic_multiple = options.outfile_basename + '_genomic_multiple'\
+                                   + ('.fa' if options.multiple_to_show==0 else outfile_suffix)
+        outfile_genomic_unique = options.outfile_basename + '_genomic_unique' + outfile_suffix
     infofile = options.outfile_basename + '_info.txt'
-    tmp_bowtie_info = options.outfile_basename + '_tmp_bowtie_info.txt'
 
-    
     with open(infofile,'w') as INFOFILE:
 
         ### write header data
         write_header_data(INFOFILE,options)
         INFOFILE.write('\n')
 
-        # MAYBE-TODO do I want to check infile readcounts here?  Especially if they're collapsed-to-unique (since in that case bowtie won't report the correct original counts, just the unique counts).  Make an option for that?  See how it's done in deepseq_preprocessing_wrapper.py using check_readcount
-
-        ### run bowtie
+        ### run bowtie vs the main/genome index file
         # run 'bowtie --version' to get that data (print to INFOFILE but not stdout)
-        command = "bowtie --version > %s"%tmp_bowtie_info
-        run_command_and_print_info(command, INFOFILE, printing=False, shell=True)
-        print_text_from_file(tmp_bowtie_info, INFOFILE, printing=False, add_newlines=1)
+        run_command_print_info_output("bowtie --version", INFOFILE, printing=False, shell=True)
         # run the actual bowtie alignment command; always print output to stdout as well as INFOFILE
         #   (bowtie actually prints the summary to stderr, not stdout, so I need to print it to stdout in case there's 
         #    an error, so I can see the error message!  Or I could try to detect whether there was an error or not
         #    based on the output contents, but that seems like unnecessary work.)
-        command = "bowtie %s %s %s %s 2> %s"%(options.full_bowtie_options, options.bowtie_index,
-                                              infile, outfile, tmp_bowtie_info)
-        run_command_and_print_info(command, INFOFILE, printing=True, shell=True)
-        print_text_from_file(tmp_bowtie_info, INFOFILE, printing=True, add_newlines=1)
-        # remove tmpfile
-        if os.path.exists(tmp_bowtie_info):     os.remove(tmp_bowtie_info)
+        command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, multiple_bowtie_option, 
+                                              options.other_bowtie_options, options.genome_bowtie_index, infile, outfile)
+        run_command_print_info_output(command, INFOFILE, printing=True, shell=True)
 
-        # MAYBE-TODO parse the bowtie summary to make my own read-count etc summary?  Not sure if there's a point.
 
-        # MAYBE-TODO do I want to check outfile readcounts here, especially if they're collapsed-to-unique?  How?  I might want to rewrite basic_programs/seq_count_and_lengths.py to take SAM input as well as fasta/fastq...?
+        ### run bowtie vs the cassette index file if given
+        if options.cassette_bowtie_index != 'NONE':
+            command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, '--all', options.other_bowtie_options, 
+                                                  options.cassette_bowtie_index, infile, outfile)
+            run_command_print_info_output(command, INFOFILE, printing=True, shell=True)
+
+
+        # TODO now parse the two files, merge them together to decide the proper category for each read, and write the info to appropriate final output files (either outfile_all, or outfile_unaligned+outfile_cassette+outfile_genomic_multiple+outfile_genomic_unique, depending on options.dont_split_by_category)
+        # see ../../TODOs_to_move_to_other_files.txt file for more notes.
+
+
+        # TODO delete tmpfiles
+
+        # TODO keep track of readcounts in each category, put them in INFOFILE (remember to uncollapse!)
 
         ### copy preprocessing metadata file to the bottom of the new metadata file
         INFOFILE.write("\n################## Metadata from input preprocessing ##################\n\n")
@@ -108,5 +169,50 @@ if __name__ == "__main__":
         # MAYBE-TODO could actually parse input metadata file and make sure the number of reads found by bowtie matches the one reported at the end of the file, etc...
 
 
-# MAYBE-TODO write run-tests?
+def do_test_run():
+    """ Test run: run script on test infile, compare output to reference file."""
+    from testing_utilities import run_functional_tests
+    test_folder = "test_data"
+    sys.exit("NO TESTS DEFINED!")
+    # tests in (testname, [test_description,] arg_and_infile_string) format
+    test_runs = [ ]
+    # argument_converter converts (parser,options,args) to the correct argument order for main
+    argument_converter = lambda parser,options,args: (args, options)
+    # use my custom function to run all the tests, auto-detect reference files, compare to output.
+    return run_functional_tests(test_runs, define_option_parser(), main, test_folder, 
+                                argument_converter=argument_converter, append_to_outfilenames='.txt') 
+    # LATER-TODO add run-tests!
 
+
+class Testing(unittest.TestCase):
+    """ Unit-tests this module. """
+
+    def test__(self):
+        sys.exit("NO UNIT-TESTS FOR THIS MODULE")
+    # LATER-TODO add unit-tests?
+
+
+if __name__=='__main__':
+    parser = define_option_parser()
+    options,args = parser.parse_args()
+
+    # if run with -t option, do unit tests and quit
+    if options.test_functionality:
+        print("*** You used the -t option - ignoring all other options/arguments, running the built-in test suite. ***")
+        # to run tests for another file, have to use TextTestRunner, not unittest.main -  make a test suite with 
+        #   autodetection of all tests (see http://docs.python.org/library/unittest.html#unittest.TestLoader)
+        #print("\n * unit-tests for the ______ module")
+        #test_suite_1 = unittest.defaultTestLoader.loadTestsFromModule(______
+        #unittest.TextTestRunner(verbosity=1).run(test_suite_1)
+        # to run tests for current module, just run unittest.main, passing it only the filename 
+        #   (by default it takes all of sys.argv and complains about options/arguments it can't recognize)
+        print("\n * unit-tests for this module (%s)"%sys.argv[0])
+        unittest.main(argv=[sys.argv[0]])   # unittest.main automatically runs sys.exit()
+
+    if options.test_run:
+        print("*** You used the -T option - ignoring all other options and running the built-in example test runs. ***")
+        test_result = do_test_run()
+        sys.exit(test_result)
+
+    # otherwise pass the arguments to the main function
+    main(args, options)

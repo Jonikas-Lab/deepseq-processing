@@ -1,0 +1,6 @@
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0

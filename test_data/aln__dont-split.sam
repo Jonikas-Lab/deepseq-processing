@@ -1,0 +1,11 @@
+1_unaligned_genome_3errors-10	4	*	0	0	*	*	0	0	CATCCGGAAGCGCCATCTTC	IIIIIIIIIIIIIIIIIIII	XM:i:0
+2_genome_single_perfect-10	0	chromosome_17	4916458	255	21M	*	0	0	TGGGCGCAGGGTGTTTCGCAC	IIIIIIIIIIIIIIIIIIIII	XA:i:0	MD:Z:21	NM:i:0
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>3_genome_multiple_perfect-10\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+<REGEX>4_genome_multiple_cassette_imperfect-1\t\d+\t(chromosome|scaffold)_\d+\t.*\tNM:i:0
+5_cassette_single-1	0	insertion_cassette_pMJ013b	1	255	21M	*	0	0	GTTGGAACCAATCGTCACACG	IIIIIIIIIIIIIIIIIIIII	XA:i:0	MD:Z:21	NM:i:0
+<REGEX>6_cassette_multiple_and_genome-1\t\d+\tinsertion_cassette_pMJ013b\t.*\tNM:i:0
+<REGEX>6_cassette_multiple_and_genome-1\t\d+\tinsertion_cassette_pMJ013b\t.*\tNM:i:0

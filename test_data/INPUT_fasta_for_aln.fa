@@ -1,0 +1,12 @@
+>1_unaligned_genome_3errors-10
+CATCCGGAAGCGCCATCTTC
+>2_genome_single_perfect-10
+TGGGCGCAGGGTGTTTCGCAC
+>3_genome_multiple_perfect-10
+TATGCTCTGGACCCACCTCCT
+>4_genome_multiple_cassette_imperfect-1
+GTTGGG
+>5_cassette_single-1
+GTTGGAACCAATCGTCACACG
+>6_cassette_multiple_and_genome-1
+GTTGGA

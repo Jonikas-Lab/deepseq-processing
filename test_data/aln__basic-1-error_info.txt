@@ -34,8 +34,8 @@ Reported 33 alignments to 1 output stream(s)
 ### FINAL ALIGNMENT CATEGORY COUNTS
 # total reads:  6
 # cassette:  2 (33%) (Warning: 1 multiple!!)
-# genomic-multiple:  2 (33%)
 # genomic-unique:  1 (17%)
+# multiple-genomic:  2 (33%)
 # unaligned:  1 (17%)
 
 

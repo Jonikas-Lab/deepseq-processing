@@ -20,7 +20,7 @@ Output (all filenames are based on OUTFILE_BASENAME provided by command-line opt
    - multiple output files:
      - OUTFILE_BASENAME_genomic-unique.sam - unique genomic alignments
      - OUTFILE_BASENAME_cassette.sam - cassette alignments, unique or multiple (multiple cause Warnings printed)
-     - OUTFILE_BASENAME_genomic-multiple.* - format (sam or fasta) and how many alignments per read depends on options.
+     - OUTFILE_BASENAME_multiple-genomic.* - format (sam or fasta) and how many alignments per read depends on options.
      - OUTFILE_BASENAME_unaligned.* - format (sam or fasta) depends on options.
 
  -- Weronika Patena, Jonikas Lab, Carnegie Institution, 2011-2012
@@ -89,22 +89,22 @@ def write_SAM_line_from_HTSeq_aln(htseq_aln, OUTFILE):
     OUTFILE.write(htseq_aln.get_sam_line().replace(' ','\t') + '\n')
 
 
-def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSETTE_FILE, GENOMIC_MULTIPLE_FILE, 
+def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, 
                                     GENOMIC_UNIQUE_FILE, unaligned_as_fasta=True, multiple_to_write=-1, 
                                     input_collapsed_to_unique=False, no_warnings=False):
     """ Decide the proper category for each read, write to appropriate output file; return category counts. 
     
     Categories: unaligned, cassette (one or more cassette alignments - print warning if multiple), 
-     genomic-unique (single non-cassette alignment), genomic-multiple (multiple non-cassette alignments. 
+     genomic-unique (single non-cassette alignment), multiple-genomic (multiple non-cassette alignments. 
     If input_collapsed_to_unique, for the purpose of category counts each read will be counted as N reads, 
      with N determined from readname using the fastx-collapser encoding.
     In the output category counts, cassette-multiple is a special subcategory - anything in it is also counted in cassette.
 
     Each read is printed to the appropriate outfile (all outfiles should be open file handles); 
-     for genomic-multiple, multiple_to_write lines will be written; if unaligned_as_fasta, unaligned reads
-     will be written as fasta instead of SAM format (and so will genomic-multiple if multiple_to_write is 0).
+     for multiple-genomic, multiple_to_write lines will be written; if unaligned_as_fasta, unaligned reads
+     will be written as fasta instead of SAM format (and so will multiple-genomic if multiple_to_write is 0).
     """
-    category_readcounts = {'unaligned':0, 'cassette':0, 'genomic-multiple':0, 'genomic-unique':0, 'cassette-multiple':0}
+    category_readcounts = {'unaligned':0, 'cassette':0, 'multiple-genomic':0, 'genomic-unique':0, 'cassette-multiple':0}
 
     for readname,aln_list in sorted(readname_to_aln_list.items()):
         readcount = 1 if not input_collapsed_to_unique else get_seq_count_from_collapsed_header(readname)
@@ -121,7 +121,7 @@ def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSET
             else:
                 category_readcounts['genomic-unique'] += readcount
                 write_SAM_line_from_HTSeq_aln(aln, GENOMIC_UNIQUE_FILE)
-        # if there are multiple alignments, it's cassette-multiple (weird!) or genomic-multiple
+        # if there are multiple alignments, it's cassette-multiple (weird!) or multiple-genomic
         else:
             assert all([aln.aligned for aln in aln_list]), "Shouldn't see multiple unaligned lines per read!"
             # multiple-cassette - shouldn't really happen, but write to CASSETTE_FILE
@@ -138,15 +138,15 @@ def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSET
             #  if it's 0, the outfile should be fasta, or else I guess it should be written as unaligned?
             #   (MAYBE-TODO writing single multiple as unaligned not implemented!)
             else:
-                category_readcounts['genomic-multiple'] += readcount
+                category_readcounts['multiple-genomic'] += readcount
                 if multiple_to_write == 0:
                     if unaligned_as_fasta:
-                        write_fasta_line(readname, aln_list[0].read.seq, GENOMIC_MULTIPLE_FILE)
+                        write_fasta_line(readname, aln_list[0].read.seq, MULTIPLE_GENOMIC_FILE)
                     else:
                         raise Exception("Writing 0 multiple alignments in SAM format NOT IMPLEMENTED!")
                 else:
                     for aln in aln_list[:multiple_to_write]:
-                        write_SAM_line_from_HTSeq_aln(aln, GENOMIC_MULTIPLE_FILE)
+                        write_SAM_line_from_HTSeq_aln(aln, MULTIPLE_GENOMIC_FILE)
     return category_readcounts
 
 
@@ -235,7 +235,7 @@ def main(args, options):
     else:
         outfile_unaligned = options.outfile_basename + '_unaligned.fa'
         outfile_cassette = options.outfile_basename + '_cassette' + outfile_suffix
-        outfile_genomic_multiple = options.outfile_basename + '_genomic-multiple'\
+        outfile_multiple_genomic = options.outfile_basename + '_multiple-genomic'\
                                    + ('.fa' if options.multiple_to_show==0 else outfile_suffix)
         outfile_genomic_unique = options.outfile_basename + '_genomic-unique' + outfile_suffix
     infofile = options.outfile_basename + '_info.txt'
@@ -299,10 +299,10 @@ def main(args, options):
         else:
             with open(outfile_unaligned, 'w') as UNALIGNED_FILE:
                 with open(outfile_cassette, 'w') as CASSETTE_FILE:
-                    with open(outfile_genomic_multiple, 'w') as GENOMIC_MULTIPLE_FILE:
+                    with open(outfile_multiple_genomic, 'w') as MULTIPLE_GENOMIC_FILE:
                         with open(outfile_genomic_unique, 'w') as GENOMIC_UNIQUE_FILE:
                             category_counts = categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, 
-                                                      CASSETTE_FILE, GENOMIC_MULTIPLE_FILE, GENOMIC_UNIQUE_FILE, 
+                                                      CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, 
                                                       unaligned_as_fasta=True, multiple_to_write=options.multiple_to_show, 
                                                       input_collapsed_to_unique=options.input_collapsed_to_unique, 
                                                       no_warnings=options.quiet)

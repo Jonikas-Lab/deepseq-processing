@@ -330,7 +330,15 @@ def main(args, options):
             INFOFILE.write('Not looking for a metadata input file, as specified by options\n')
         else:
             if options.input_metadata_file == 'AUTO':
-                options.input_metadata_file = os.path.splitext(infile)[0] + '_info.txt'
+                # the correct info file for X.txt is X.fa, but for X_5prime.txt it can be either X_5prime.txt or X.txt, so try both.
+                #  (in the new preprocessing version all files are X_*prime.txt and the info files are X_info.txt; 
+                #   in the old version it was just X.txt and X_info.txt)
+                # MAYBE-TODO add a test-case for this thing!  Probably too minor.
+                metafile_basename = os.path.splitext(infile)[0] 
+                options.input_metadata_file = metafile_basename + '_info.txt'
+                if not os.path.exists(options.input_metadata_file):
+                    if metafile_basename.endswith('_3prime') or metafile_basename.endswith('_5prime'):
+                        options.input_metadata_file = metafile_basename[:-len('_3prime')] + '_info.txt'
                 text = 'Automatically determining metadata input file name: %s\n'%options.input_metadata_file
                 if not options.quiet:
                     print text,

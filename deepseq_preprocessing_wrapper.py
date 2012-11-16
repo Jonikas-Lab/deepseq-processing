@@ -41,7 +41,7 @@ from Bio import SeqIO
 from Bio.SeqIO.QualityIO import FastqGeneralIterator
 # my modules
 from general_utilities import write_header_data, run_command_print_info_output, value_and_percentages
-from seq_basic_utilities import write_fasta_line, name_seq_generator_from_fasta_fastq
+from seq_basic_utilities import parse_fasta, write_fasta_line, name_seq_generator_from_fasta_fastq
 import seq_count_and_lengths
 
 
@@ -69,13 +69,15 @@ def _trim_prefix_single(seqname, seq, prefix_bases, TRIMMED_OUTFILE, WRONG_PREFI
     """ If prefix_bases is a prefix of seq, trim it off, print to TRIMMED_OUTFILE, return 1; 
     otherwise print to WRONG_PREFIX_OUTFILE if not None, return 0. 
     """
-    if seq.startswith(prefix_bases):
+    if seq.upper().startswith(prefix_bases.upper()):
         seq_trimmed = seq[len(prefix_bases):]
-        write_fasta_line(seqname, seq_trimmed, TRIMMED_OUTFILE)
+        # some fastx_toolkit tools give errors on lowercase bases, so make everything uppercase
+        write_fasta_line(seqname, seq_trimmed.upper(), TRIMMED_OUTFILE)
         return 1
     else:
         if WRONG_PREFIX_OUTFILE is not None:
-            write_fasta_line(seqname, seq, WRONG_PREFIX_OUTFILE)
+            # some fastx_toolkit tools give errors on lowercase bases, so make everything uppercase
+            write_fasta_line(seqname, seq.upper(), WRONG_PREFIX_OUTFILE)
         return 0
     # MAYBE-TODO add an option that specifies the number/percentage of allowed mismatches?
 
@@ -123,10 +125,16 @@ def define_option_parser():
     parser.add_option('-F','--first_bases_to_trim', metavar='SEQ|NONE', default='ACTA',  
                       help="Sequence to trim from the beginning of each read - reads that don't start with that sequence "
                       +"will end up in another file. Set to NONE to not trim any bases.  Default %default.")
-    parser.add_option('-A','--full_cutadapt_options', metavar='"text"', 
-                      default='-a GTTGGAACCAAT -e 0.1 -O 10 -n 1 -m 20 -M 21', 
-                      help="Full set of options to pass to cutadapt, as a quoted string. Set to NONE to not run it."
-                      +' For help on available options (long), run "cutadapt -h" on the command-line. Default "%default".')
+    parser.add_option('-5','--adapter_5prime', metavar='SEQ', default='GTTGGAaccaat', 
+                      help='adapter sequence for 5\' flanking regions, to pass to cutadapt.  Default "%default".'
+                      +' Set to "" if no 5\' flanking regions are expected. To run cutadapt, one or both of -3/-5 must be set.')
+    parser.add_option('-3','--adapter_3prime', metavar='SEQ', default='GTTGGAgcgcgg', 
+                      help='adapter sequence for 3\' flanking regions, to pass to cutadapt.  Default "%default".'
+                      +' Set to "" if no 3\' flanking regions are expected. To run cutadapt, one or both of -3/-5 must be set.')
+    parser.add_option('-A','--other_cutadapt_options', metavar='"TEXT"', default='-e 0.1 -O 10 -n 1 -m 20 -M 21', 
+                      help="Other options to pass to cutadapt (except adapter sequences - those are set with -5/-3), "
+                      +'as a quoted string. Set to NONE to not run cutadapt. Default "%default". '
+                      +'For help on available options, run "cutadapt -h" on the command-line.')
     parser.add_option('-C','--collapse_to_unique', action="store_true", default=False, 
                       help="Run output through fastx_collapser to collapse all identical-sequence reads to unique ones. "
                       +"(converts fastq to fasta) (default %default).")
@@ -142,9 +150,6 @@ def define_option_parser():
                       help="Don't check whether the read counts after fastx_collapser (uncollapsed based on header info) "
                       +"match the ones before (by default this check is done and prints a warning if failed, but it "
                       +"takes a while on long files).")
-    parser.add_option('-U','--never_check_readcounts_lengths', action="store_true", default=False, 
-                      help="Don't check file readcounts/lengths at any stage (to save time) - note that this means "
-                      +"no by-stage readcount summary at the end! (default: do check)")
 
     ### outfile options
     parser.add_option('-o','--outfile_basename', metavar='X', default='test_preprocessing_output', 
@@ -186,16 +191,25 @@ def main(args, options):
         sys.exit("Error: exactly one infile required!")
     # MAYBE-TODO implement option with multiple infiles? Need to make sure they're the same fa/fq type etc...
 
+    ### check inputs
+    adapter_options = '-a --adapter -b --anywhere -g --front'
+    if any([x in options.other_cutadapt_options for x in adapter_options.split()]):
+        sys.exit("Error: --other_cutadapt_options value shouldn't contain any adapter seq options (%s)"%adapter_options
+                 +" - use -5/-3 options to specify adapters instead!")
+
     ### outfile and tmpfile names
     infile_suffix = os.path.splitext(infile)[1]
     outfile_suffix = '.fa'
     #outfile_suffix = '.fa' if options.collapse_to_unique else infile_suffix
-    outfile = options.outfile_basename + outfile_suffix
+    ends = "5' 3'".split()
+    outfiles = {end: options.outfile_basename + '_%s.fa'%end.replace("'","prime") for end in ends}
     infofile = options.outfile_basename + '_info.txt'
     wrong_start_file = options.outfile_basename + '_wrong-start.fa'
+    no_cassette_tmpfiles = {end: options.outfile_basename + '_no-cassette-tmpfile_%s.fa'%end.replace("'","prime") for end in ends}
     no_cassette_file = options.outfile_basename + '_no-cassette.fa'
-    tmpfile1 = tmpfile1_original = options.outfile_basename + '_tmpfile1.fa'
-    tmpfile2 = tmpfile2_original = options.outfile_basename + '_tmpfile2.fa'
+    trimmed_tmpfile = trimmed_tmpfile_original = options.outfile_basename + '_trimmed-tmpfile.fa'
+    cutadapt_tmpfiles = {end: options.outfile_basename + '_cutadapt-tmpfile_%s.fa'%end.replace("'","prime") for end in ends}
+    cutadapt_tmpfiles_original = cutadapt_tmpfiles
     
     with open(infofile,'w') as INFOFILE:
 
@@ -205,9 +219,8 @@ def main(args, options):
 
         ### 0. look at the infile; make sure it's readable, etc
         #       (check_readcount uses seq_count_and_lengths, which uses HTSeq and autodetects fa/fq format)
-        if not options.never_check_readcounts_lengths:
-            starting_readcount = check_readcount(infile, INFOFILE, bool(options.verbosity>1), "original input", 
-                                                 options.total_read_number_only, False)
+        starting_readcount = check_readcount(infile, INFOFILE, bool(options.verbosity>1), "original input", 
+                                             options.total_read_number_only, False)
 
         ### 1. Trim the first bases (from adapter)
         # MAYBE-TODO I could do this with cutadapt again, instead of with my own trim_prefix function... 
@@ -215,117 +228,171 @@ def main(args, options):
         # MAYBE-TODO could also do it with a multiplexing barcode-splitting tool (like fastx_barcode_splitter.pl), 
         #  since that's the eventual point of having those constant first bases there...
         if options.first_bases_to_trim == 'NONE':
-            if options.verbosity>0:   print "### Not trimming first bases, since NONE was passed to -F option.\n"
-            tmpfile1 = infile
+            text = "### Not trimming first bases, since NONE was passed to -F option.\n"
+            if options.verbosity>0:   print text
+            INFOFILE.write(text+'\n')
+            trimmed_tmpfile = infile
             trimmed_readcount = starting_readcount
             untrimmed_readcount = 0
         else:
-            trim_prefix(options.first_bases_to_trim, infile, tmpfile1, wrong_start_file, INFOFILE, options.verbosity)
-            if not options.never_check_readcounts_lengths:
-                trimmed_readcount = check_readcount(tmpfile1, INFOFILE, bool(options.verbosity>1), 
-                                                    "first-base-trimming output", options.total_read_number_only, False)
-                untrimmed_readcount = check_readcount(wrong_start_file, None, False, True, False)
-                assert trimmed_readcount+untrimmed_readcount==starting_readcount,\
-                        "Trimmed/untrimmed readcounts don't add up to starting readcount - check tmpfile!"\
-                        +"(%s+%s != %s)"%(trimmed_readcount, untrimmed_readcount, starting_readcount)
-            else: INFOFILE.write('\n')
+            trim_prefix(options.first_bases_to_trim, infile, trimmed_tmpfile, wrong_start_file, INFOFILE, options.verbosity)
+            trimmed_readcount = check_readcount(trimmed_tmpfile, INFOFILE, bool(options.verbosity>1), 
+                                                "first-base-trimming output", options.total_read_number_only, False)
+            untrimmed_readcount = check_readcount(wrong_start_file, None, False, True, False)
+            assert trimmed_readcount+untrimmed_readcount==starting_readcount,\
+                    "Trimmed/untrimmed readcounts don't add up to starting readcount - check tmpfile!"\
+                    +"(%s+%s != %s)"%(trimmed_readcount, untrimmed_readcount, starting_readcount)
 
         ### 2. run cutadapt to strip cassette sequence
-        if options.full_cutadapt_options == 'NONE':
-            if options.verbosity>0:   print "### Not running cutadapt, since NONE was passed to -A option.\n"
-            tmpfile2 = tmpfile1
-            cutadapt_readcount = trimmed_readcount
+            # NOTE: this currently requires my version of cutadapt, cutadapt_mod (based on some older cutadapt version), 
+            #  to deal with too-long seqs correctly - LATER-TODO submit my modification as a patch to cutadapt to get it in the 
+            #  standard install!  Or wait until the cutadapt maintainer does it (I submitted it as an issue) 
+            #  (see ~/experiments/basic_programs/cutadapt_modifications/).
+        if_running_cutadapt = True
+        if options.other_cutadapt_options == 'NONE':
+            if_running_cutadapt = False
+            text = "### Not running cutadapt, since NONE was passed to -A option.\n"
+        elif not (options.adapter_5prime or options.adapter_3prime):
+            if_running_cutadapt = False
+            text = "### Not running cutadapt, since empty sequences were passed to -5 and -3 options.\n"
+        # if not running it, just skip it 
+        if not if_running_cutadapt:
+            if options.verbosity>0:   print text
+            INFOFILE.write(text+'\n')
+            cutadapt_tmpfile = trimmed_tmpfile
+            cutadapt_readcount = {'all': trimmed_readcount}
             no_cassette_readcount = 0
+        # otherwise run the 5' and 3' ends separately
         else:
-            for extra_seq_category in ('untrimmed', 'too-short', 'too-long'):
-                if not extra_seq_category in options.full_cutadapt_options:
-                    options.full_cutadapt_options += ' --%s-output %s'%(extra_seq_category, no_cassette_file)
-            # NOTE: this currently requires my version of cutadapt, cutadapt_mod, to deal with too-long seqs correctly
-            command = "cutadapt_mod %s -o %s %s"%(options.full_cutadapt_options, tmpfile2, tmpfile1)
-            run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True)
-            if not options.never_check_readcounts_lengths:
-                cutadapt_readcount = check_readcount(tmpfile2, INFOFILE, bool(options.verbosity>1), "cutadapt output", 
-                                                    options.total_read_number_only, False)
-                no_cassette_readcount = check_readcount(no_cassette_file, None, False, True, False)
-                assert cutadapt_readcount+no_cassette_readcount==trimmed_readcount,\
-                        "Cassette/no-cassette readcounts don't add up to trimmed readcount - check tmpfile!"\
-                        +"(%s+%s != %s)"%(cutadapt_readcount, no_cassette_readcount, trimmed_readcount)
+            cutadapt_readcount = {}
+            for (end_type, adapter_seq) in [("5'", options.adapter_5prime), ("3'", options.adapter_3prime)]:
+                assert end_type in ends
+                # if the adapter sequence for that side is empty, skip
+                if not adapter_seq.replace('"','').replace("'",'').replace(' ',''):  continue
+                cutadapt_tmpfile = cutadapt_tmpfiles[end_type]
+                full_cutadapt_options = '-a %s %s'%(adapter_seq, options.other_cutadapt_options)
+                for extra_seq_category in ('untrimmed', 'too-short', 'too-long'):
+                    if not extra_seq_category in full_cutadapt_options:
+                        full_cutadapt_options += ' --%s-output %s'%(extra_seq_category, no_cassette_tmpfiles[end_type])
+                command = "cutadapt_mod %s -o %s %s"%(full_cutadapt_options, cutadapt_tmpfile, trimmed_tmpfile)
+                run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True, 
+                                              program_name="cutadapt for %s"%end_type)
+                cutadapt_readcount[end_type] = check_readcount(cutadapt_tmpfile, INFOFILE, bool(options.verbosity>1), 
+                                                               "cutadapt output", options.total_read_number_only, False)
+                tmp_no_cassette_readcount = check_readcount(no_cassette_tmpfiles[end_type], None, False, True, False)
+                assert cutadapt_readcount[end_type] + tmp_no_cassette_readcount == trimmed_readcount,\
+                        "%s cassette/no-cassette readcounts don't add up to trimmed readcount - check tmpfile!"\
+                        +"(%s+%s != %s)"%(end_type, cutadapt_readcount[end_type], tmp_no_cassette_readcount, trimmed_readcount)
+            # make an actual no_cassette_file based on the overlap of the two no_cassette_tmpfiles!
+            text = "### Merging the 5' and 3' cutadapt untrimmed outputs to get single no-cassette file.\n"
+            if options.verbosity>0:   print text
+            INFOFILE.write(text+'\n')
+            no_cassette_seqs = []
+            for no_cassette_tmpfile in no_cassette_tmpfiles.values():
+                try:                no_cassette_seqs.append(dict(parse_fasta(no_cassette_tmpfile)))
+                except IOError:     pass
+            # the real no-cassette seqs are the intersection of the seq headers from both no_cassette_tmpfile sets
+            overlapping_no_cassette_headers = set.intersection(*[set(d.keys()) for d in no_cassette_seqs])
+            no_cassette_readcount = len(overlapping_no_cassette_headers)
+            with open(no_cassette_file,'w') as NO_CASSETTE_FILE:
+                for header in sorted(overlapping_no_cassette_headers):
+                    # some fastx_toolkit tools give errors on lowercase bases, so make everything uppercase
+                    write_fasta_line(header, no_cassette_seqs[0][header].upper(), NO_CASSETTE_FILE)
+            assert no_cassette_readcount + sum(cutadapt_readcount.values()) == trimmed_readcount,\
+                            "Final cassette/no-cassette readcounts don't add up to trimmed readcount - check tmpfile!"\
+                            +"(%s+%s != %s)"%(sum(cutadapt_readcount.values()), no_cassette_readcount, trimmed_readcount)
+            # remove the original no_cassette_tmpfiles
+            for tmpfile in no_cassette_tmpfiles.values():
+                if os.path.exists(tmpfile):     os.remove(tmpfile)
 
         ### 3. run fastx_collapser to collapse the sequences to unique
         if not options.collapse_to_unique:
-            if options.verbosity>0:   print "### Not running fastx_collapser, since -C option was not used.\n"
-            os.rename(tmpfile2,outfile)
+            text = "### Not running fastx_collapser, since -C option was not used.\n"
+            if options.verbosity>0:   print text
+            INFOFILE.write(text+'\n')
+            for (end_type,cutadapt_tmpfile) in cutadapt_tmpfiles.items():
+                if os.path.exists(cutadapt_tmpfile):     os.rename(cutadapt_tmpfile, outfiles[end_type])
             collapsed_readcount = cutadapt_readcount
             # Note for fastx_collapser, but also for the others - NONE is necessary here, can't just use '', because 
             #    fastx_collapser works fine with no options, so '' is a sensible input and can't be used to turn it off.
         else:
-            command = "fastx_collapser -v %s -i %s -o %s"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
-                                                           tmpfile2, outfile)
-            run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True)
-            INFOFILE.write('\n')
-            if not options.never_check_readcounts_lengths:
-                collapsed_readcount = check_readcount(outfile,INFOFILE,bool(options.verbosity>1),"fastx_collapser output", 
-                                                      options.total_read_number_only, input_collapsed_to_unique=False)
-            # make sure uncollapsed readcount is the same as before collapsing
-            if not (options.never_check_readcounts_lengths or options.dont_check_uncollapsed_reads):
-                uncollapsed_readcount = check_readcount(outfile, None, False, "", True, input_collapsed_to_unique=True)
-                if not uncollapsed_readcount == cutadapt_readcount:
+            collapsed_readcount, uncollapsed_readcount = {}, {}
+            for (end_type,cutadapt_tmpfile) in cutadapt_tmpfiles.items():
+                outfile = outfiles[end_type]
+                # if there is no file for that end, skip
+                if not os.path.exists(cutadapt_tmpfile):     continue
+                command = "fastx_collapser -v %s -i %s -o %s"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
+                                                               cutadapt_tmpfile, outfile)
+                run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True, 
+                                              program_name="fastx_collapser for %s"%end_type)
+                INFOFILE.write('\n')
+                collapsed_readcount[end_type] = check_readcount(outfile,INFOFILE,bool(options.verbosity>1),
+                                    "fastx_collapser output", options.total_read_number_only, input_collapsed_to_unique=False)
+                # make sure uncollapsed readcount is the same as before collapsing
+                uncollapsed_readcount[end_type] = check_readcount(outfile, None, False, "", True, input_collapsed_to_unique=True)
+                if not uncollapsed_readcount[end_type] == cutadapt_readcount[end_type]:
                     text = "ERROR: the uncollapsed read-count after fastx_collapser isn't the same as the before-collapser count!  Collapsing went wrong somehow, or the way fastx_collapser works changed since this program was written?\n"
                 else:
                     text = "(checked that all the reads are still there if you uncollapse the numbers using header info)\n"
                 if options.verbosity: print text
                 INFOFILE.write(text+'\n')
             # also run fastx_collapser on wrong_start_file and no_cassette_file
-            if options.verbosity:
-                print "### Running fastx_collapser on the additional output files. Not printing the output to info file."
+            text = "### Running fastx_collapser on the \"bad\" output files. Not printing the output to info file.\n"
+            if options.verbosity: print text
+            INFOFILE.write(text+'\n')
             extra_collapsed_readcounts = {}    
             for extra_file in (wrong_start_file, no_cassette_file):
                 command = "fastx_collapser -v %s -i %s -o tmp.fa"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
                                                                    extra_file)
                 retcode = run_command_print_info_output(command, None, bool(options.verbosity>1), shell=True)
-                if retcode in (0, None):
+                # note: actually fastx_collapser doesn't give proper retcodes, so just check if outfile exists
+                #  (also it chokes on empty files, AND on lowercase bases!  That's a bit ridiculous...)
+                #  it also apparently sometimes changes the order of the sequences for no good reason! ARGH.
+                if retcode in (0, None) and os.path.exists('tmp.fa'):
                     os.remove(extra_file)
                     os.rename('tmp.fa', extra_file)
                 extra_collapsed_readcounts[extra_file] = check_readcount(extra_file, None, False, "", True, 
-                                                                         input_collapsed_to_unique=False)
+                                                                             input_collapsed_to_unique=False)
 
         ### Final readcount check
-        if not options.never_check_readcounts_lengths:
-            final_output = ["### Final read count info for %s (main output file %s)\n"%(infile, outfile)]
-            final_output.append("# starting total read count:\t%s\n"%starting_readcount)
+        final_output = ["### Final read count info for %s (main output files %s)\n"%(infile, ', '.join(outfiles))]
+        final_output.append("# starting total read count:\t%s\n"%starting_readcount)
+        if not options.first_bases_to_trim == 'NONE':
+            final_output.append('# "good" read count after start trimming (%% of total):\t%s\n'%
+                                value_and_percentages(trimmed_readcount, [starting_readcount]))
+            final_output.append('#  "bad" read count (wrong-start) (%% of total):\t%s\n'%
+                                value_and_percentages(untrimmed_readcount, [starting_readcount]))
+        if if_running_cutadapt:
+            for end_type in cutadapt_readcount.keys():
+                final_output.append('# "good" %s read count after cassette stripping (%% of total, %% of trimmed):\t%s\n'%
+                        (end_type, value_and_percentages(cutadapt_readcount[end_type], [starting_readcount, trimmed_readcount])))
+            final_output.append('#  "bad" read count (no-cassette) (%% of total, %% of trimmed):\t%s\n'%
+                                value_and_percentages(no_cassette_readcount, [starting_readcount, trimmed_readcount]))
+        for end_type in cutadapt_readcount.keys():
+            final_output.append('## final "good" %s reads (in main output file) (%% of total):\t%s\n'%(end_type, 
+                                value_and_percentages(cutadapt_readcount[end_type], [starting_readcount])))
+        final_output.append('## final "bad" reads (in _wrong-start and/or _no-cassette files) (%% of total):\t%s\n'%
+                            value_and_percentages(starting_readcount-sum(cutadapt_readcount.values()), [starting_readcount]))
+        if options.collapse_to_unique:
+            for end_type in cutadapt_readcount.keys():
+                final_output.append('# "good" %s unique sequence count after collapsing reads to unique sequences '%end_type
+                                    +'(%% of read count):\t%s\n'%value_and_percentages(collapsed_readcount[end_type], 
+                                                                                       [cutadapt_readcount[end_type]]))
             if not options.first_bases_to_trim == 'NONE':
-                final_output.append('# "good" read count after start trimming (%% of total):\t%s\n'%
-                                    value_and_percentages(trimmed_readcount, [starting_readcount]))
-                final_output.append('#  "bad" read count (wrong-start) (%% of total):\t%s\n'%
-                                    value_and_percentages(untrimmed_readcount, [starting_readcount]))
-            if not options.full_cutadapt_options == 'NONE':
-                final_output.append('# "good" read count after cassette stripping (%% of total, %% of trimmed):\t%s\n'%
-                                    value_and_percentages(cutadapt_readcount, [starting_readcount, trimmed_readcount]))
-                final_output.append('#  "bad" read count (no-cassette) (%% of total, %% of trimmed):\t%s\n'%
-                                    value_and_percentages(no_cassette_readcount, [starting_readcount, trimmed_readcount]))
-            final_output.append('## final "good" reads (in main output file) (%% of total):\t%s\n'%
-                                value_and_percentages(cutadapt_readcount, [starting_readcount]))
-            final_output.append('## final "bad" reads (in _wrong-start and/or _no-cassette files) (%% of total):\t%s\n'%
-                                value_and_percentages(starting_readcount-cutadapt_readcount, [starting_readcount]))
-            if options.collapse_to_unique:
-                final_output.append('# "good" unique sequence count after collapsing reads to unique sequences '
-                                    '(%% of read count):\t%s\n'
-                                    %value_and_percentages(collapsed_readcount, [cutadapt_readcount]))
-                if not options.first_bases_to_trim == 'NONE':
-                    final_output.append('# wrong-start unique sequence count after collapsing (%% of read count):\t%s\n'
-                            %value_and_percentages(extra_collapsed_readcounts[wrong_start_file], [untrimmed_readcount]))
-                if not options.full_cutadapt_options == 'NONE':
-                    final_output.append('# no-cassette unique sequence count after collapsing (%% of read count):\t%s\n'
-                            %value_and_percentages(extra_collapsed_readcounts[no_cassette_file], [no_cassette_readcount]))
-            for line in final_output:
-                INFOFILE.write(line)
-                if options.verbosity>0:  print line,
+                final_output.append('# wrong-start unique sequence count after collapsing (%% of read count):\t%s\n'
+                        %value_and_percentages(extra_collapsed_readcounts[wrong_start_file], [untrimmed_readcount]))
+            if if_running_cutadapt:
+                final_output.append('# no-cassette unique sequence count after collapsing (%% of read count):\t%s\n'
+                        %value_and_percentages(extra_collapsed_readcounts[no_cassette_file], [no_cassette_readcount]))
+        for line in final_output:
+            INFOFILE.write(line)
+            if options.verbosity>0:  print line,
 
     ### Remove tmpfiles
-    # need to use the tmpfile*_original names here because I do "tmpfile1 = infile" etc if skipping steps, 
+    # need to use the tmpfile*_original names here because I do "trimmed_tmpfile = infile" etc if skipping steps, 
     #   and I don't want to remove the infile!
     if not options.keep_tmpfiles:
-        for tmpfile in [tmpfile1_original, tmpfile2_original]:
+        for tmpfile in [trimmed_tmpfile_original] + cutadapt_tmpfiles_original.values():
             if os.path.exists(tmpfile):     os.remove(tmpfile)
 
 
@@ -333,12 +400,17 @@ def do_test_run():
     """ Test run: run script on test infile, compare output to reference file."""
     from testing_utilities import run_functional_tests
     test_folder = 'test_data'
-    infile1 = test_folder + '/INPUT_raw_fastq.fq'
+    infile1 = test_folder + '/INPUT_raw-fastq_complex-5prime.fq'
+    infile2 = test_folder + '/INPUT_raw-fastq_simple-both-ends.fq'
     # tests in (testname, test_description, arg_string, infiles) format
     test_runs = [ 
-        ('not-unique', "full functionality without collapsing to unique", "", [infile1]),
-        ('unique', "full functionality with collapsing to unique (for all output files)", "-C", [infile1]), 
+        ('full-not-unique', "testing all 'bad' cases, 5' end only, without collapsing to unique", '-3 ""', [infile1]),
+        ('full-unique', "testing all 'bad' cases, 5' end only, WITH collapsing to unique for all outfiles", '-3 "" -C', [infile1]), 
+        ('end-5prime', "simpler test, 5' end only (collapsing to unique)", '-3 "" -C', [infile2]), 
+        ('end-3prime', "simpler test, 3' end only (collapsing to unique)", '-5 "" -C', [infile2]), 
+        ('ends-both', "simpler test, 5' and 3' ends (collapsing to unique)", '-C', [infile2]), 
         ]
+    # MAYBE-TODO currently some of the tests are weird because fastx_collapser changes the order of the sequences for no good reason (see <IGNORE> lines in some of the files)
     # convert tests into (testname, arg_and_infile_string) format, adding the options that are always used
     test_runs = [('pre__'+testname, descr, test_args+' -Q '+' '.join(infiles)) 
                   for testname,descr,test_args,infiles in test_runs]

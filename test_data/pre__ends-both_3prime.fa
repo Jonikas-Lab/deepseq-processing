@@ -1,0 +1,5 @@
+>1-1
+CGATCGATGGCCCGTCCAAC
+>2-1
+GAGATGGCTCAGGTCCCCGAC
+<IGNORE> For some reason fastx_collapser changes the order of the lines! idk why it's like this, it may change...

@@ -102,7 +102,7 @@ def trim_prefix(prefix_bases, infile, trimmed_outfile, wrong_prefix_outfile=os.d
     with open(trimmed_outfile, 'w') as TRIMMED_OUTFILE:
         with open(wrong_prefix_outfile, 'w') as WRONG_PREFIX_OUTFILE:
             # MAYBE-TODO right now if wrong_prefix_outfile==None, /dev/null is used - it would be faster with a custom file-like object that doesn't touch the OS, but I'm not sure how to write one so it can be opened!  See general_utilities.FAKE_OUTFILE for an already open one.
-            name_seq_generator = name_seq_generator_from_fasta_fastq(infile, verbosity>1)
+            name_seq_generator = name_seq_generator_from_fasta_fastq(infile, verbosity>2)
             for name,seq in name_seq_generator:
                 if_trimmed = _trim_prefix_single(name, seq, prefix_bases, TRIMMED_OUTFILE, WRONG_PREFIX_OUTFILE)
                 if if_trimmed:  N_trimmed += 1
@@ -112,7 +112,7 @@ def trim_prefix(prefix_bases, infile, trimmed_outfile, wrong_prefix_outfile=os.d
     text = "Trimmed sequences: %s\nUntrimmed sequences: %s\n"%(value_and_percentages(N_trimmed, [N_total]), 
                                                                value_and_percentages(N_untrimmed, [N_total]))
     if INFOFILE is not None:    INFOFILE.write(text+'\n')
-    if verbosity>0:             print text
+    if verbosity>1:             print text
     return N_trimmed, N_untrimmed
 
 
@@ -275,7 +275,7 @@ def main(args, options):
                     if not extra_seq_category in full_cutadapt_options:
                         full_cutadapt_options += ' --%s-output %s'%(extra_seq_category, no_cassette_tmpfiles[end_type])
                 command = "cutadapt_mod %s -o %s %s"%(full_cutadapt_options, cutadapt_tmpfile, trimmed_tmpfile)
-                run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True, 
+                run_command_print_info_output(command, INFOFILE, options.verbosity, shell=True, 
                                               program_name="cutadapt for %s"%end_type)
                 cutadapt_readcount[end_type] = check_readcount(cutadapt_tmpfile, INFOFILE, bool(options.verbosity>1), 
                                                                "cutadapt output", options.total_read_number_only, False)
@@ -323,7 +323,7 @@ def main(args, options):
                 if not os.path.exists(cutadapt_tmpfile):     continue
                 command = "fastx_collapser -v %s -i %s -o %s"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
                                                                cutadapt_tmpfile, outfile)
-                run_command_print_info_output(command, INFOFILE, bool(options.verbosity>0), shell=True, 
+                run_command_print_info_output(command, INFOFILE, options.verbosity, shell=True, 
                                               program_name="fastx_collapser for %s"%end_type)
                 INFOFILE.write('\n')
                 collapsed_readcount[end_type] = check_readcount(outfile,INFOFILE,bool(options.verbosity>1),
@@ -334,7 +334,7 @@ def main(args, options):
                     text = "ERROR: the uncollapsed read-count after fastx_collapser isn't the same as the before-collapser count!  Collapsing went wrong somehow, or the way fastx_collapser works changed since this program was written?\n"
                 else:
                     text = "(checked that all the reads are still there if you uncollapse the numbers using header info)\n"
-                if options.verbosity: print text
+                if options.verbosity>1: print text
                 INFOFILE.write(text+'\n')
             # also run fastx_collapser on wrong_start_file and no_cassette_file
             text = "### Running fastx_collapser on the \"bad\" output files. Not printing the output to info file.\n"
@@ -344,7 +344,7 @@ def main(args, options):
             for extra_file in (wrong_start_file, no_cassette_file):
                 command = "fastx_collapser -v %s -i %s -o tmp.fa"%(FASTQ_ENCODINGS_FASTX_TOOLKIT[options.fastq_encoding], 
                                                                    extra_file)
-                retcode = run_command_print_info_output(command, None, bool(options.verbosity>1), shell=True)
+                retcode = run_command_print_info_output(command, None, options.verbosity-1, shell=True)
                 # note: actually fastx_collapser doesn't give proper retcodes, so just check if outfile exists
                 #  (also it chokes on empty files, AND on lowercase bases!  That's a bit ridiculous...)
                 #  it also apparently sometimes changes the order of the sequences for no good reason! ARGH.

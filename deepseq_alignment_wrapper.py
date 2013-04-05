@@ -191,7 +191,7 @@ def define_option_parser():
                       +"Default %default.")
     parser.add_option('-q', '--quiet', action="store_true", default=False,
                       help="Don't print anything to STDOUT, including warnings (default %default).")
-    # MAYBE-TODO more stdout verbosity levels?  Not really necessary, since I think I always want bowtie output printed to stdout - unless I end up doing read-count checks before and after too, then I may want those printed or not.
+    # MAYBE-TODO more stdout verbosity levels?  Do I ever want the full bowtie output, or just the summary?  Summary seems fine...
 
     return parser
 
@@ -248,7 +248,7 @@ def main(args, options):
         ### run bowtie vs the main/genome index file
         # run 'bowtie --version' to get that data (print to INFOFILE but not stdout)
         INFOFILE.write('\n\n')
-        run_command_print_info_output("bowtie --version", INFOFILE, printing=False, shell=True)
+        run_command_print_info_output("bowtie --version", INFOFILE, printing_level=0, shell=True)
         # run the actual bowtie alignment command; always print output to stdout as well as INFOFILE
         #   (bowtie actually prints the summary to stderr, not stdout, so I need to print it to stdout in case there's 
         #    an error, so I can see the error message!  Or I could try to detect whether there was an error or not
@@ -256,14 +256,14 @@ def main(args, options):
         INFOFILE.write('\n\n')
         command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, multiple_bowtie_option, 
                                       options.other_bowtie_options, options.genome_bowtie_index, infile, tmpfile_genome)
-        run_command_print_info_output(command, INFOFILE, printing=(not options.quiet), shell=True)
+        run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
 
         ### run bowtie vs the cassette index file if given
         if options.cassette_bowtie_index != 'NONE':
             INFOFILE.write('\n\n')
             command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, '--all', options.other_bowtie_options, 
                                                   options.cassette_bowtie_index, infile, tmpfile_cassette)
-            run_command_print_info_output(command, INFOFILE, printing=(not options.quiet), shell=True)
+            run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
 
         ### Check that bowtie runs worked
         missing_alnfile_text = "Bowtie run against %s failed! See above or %s file for bowtie error message."

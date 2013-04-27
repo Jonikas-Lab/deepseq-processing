@@ -38,7 +38,7 @@ import sys, os
 import unittest
 # my modules
 from general_utilities import write_header_data, run_command_print_info_output, value_and_percentages
-from seq_basic_utilities import parse_fasta, write_fasta_line, name_seq_generator_from_fasta_fastq
+from basic_seq_utilities import parse_fasta, write_fasta_line, name_seq_generator_from_fasta_fastq
 import seq_count_and_lengths
 
 

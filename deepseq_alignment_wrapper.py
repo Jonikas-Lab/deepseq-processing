@@ -38,7 +38,6 @@ import HTSeq
 from general_utilities import write_header_data, print_text_from_file, run_command_print_info_output, value_and_percentages
 from deepseq_utilities import check_mutation_count_try_all_methods
 from basic_seq_utilities import check_fasta_fastq_format, write_fasta_line, get_seq_count_from_collapsed_header
-from seq_count_and_lengths import seq_count_and_lengths
 from mutant_analysis_classes import is_cassette_chromosome
 
 

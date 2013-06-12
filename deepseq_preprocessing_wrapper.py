@@ -44,6 +44,17 @@ import seq_count_and_lengths
 
 FASTQ_ENCODINGS_FASTX_TOOLKIT = {'auto': '', 'sanger': '-Q33', 'illumina': '-Q64'}
 
+### 5' and 3' ends of the different cassette variants we have
+CASSETTE_pMJ013b_5prime = 'GTTGGAaccaatcgtcacacgagccctcgtcagaaacacgtctccgccac'
+CASSETTE_pMJ015b_5prime = 'GTTGGAgacaatcgtcacacgagccctcgtcagaaacacgtctccgccac'  # ga after GTTGGA is different from pMJ013b
+CASSETTE_pMJ007_5prime  = 'GTTGGAaccaatcgtcacacgagccctcgtcagaaacacgtctccgccac'  # same as pMJ013b
+CASSETTE_pMJ013b_3prime = 'GTTGGAgcgcggggcgtgttgcagcggcagggaagagcagctgatgatga'
+CASSETTE_pMJ015b_3prime = 'GTTGGAgcgcggggcgtgttgcagcggcagggaagagcagctgatgatga'  # same as pMJ013b
+CASSETTE_pMJ007_3prime  = ''  # DOES NOT GIVE 3' product!
+CASSETTE_DEFAULT_LENGTH = 12
+CASSETTE_DEFAULT_5prime = CASSETTE_pMJ013b_5prime[:CASSETTE_DEFAULT_LENGTH]
+CASSETTE_DEFAULT_3prime = CASSETTE_pMJ013b_3prime[:CASSETTE_DEFAULT_LENGTH]
+
 
 def check_readcount(infile, OUTFILE=None, printing=True, description=None, 
                     total_read_number_only=False, input_collapsed_to_unique=False):
@@ -122,12 +133,13 @@ def define_option_parser():
     parser.add_option('-F','--first_bases_to_trim', metavar='SEQ|NONE', default='ACTA',  
                       help="Sequence to trim from the beginning of each read - reads that don't start with that sequence "
                       +"will end up in another file. Set to NONE to not trim any bases.  Default %default.")
-    parser.add_option('-5','--adapter_5prime', metavar='SEQ', default='GTTGGAaccaat', 
-                      help='adapter sequence for 5\' flanking regions, to pass to cutadapt.  Default "%default".'
-                      +' Set to "" if no 5\' flanking regions are expected. To run cutadapt, one or both of -3/-5 must be set.')
-    parser.add_option('-3','--adapter_3prime', metavar='SEQ', default='GTTGGAgcgcgg', 
-                      help='adapter sequence for 3\' flanking regions, to pass to cutadapt.  Default "%default".'
-                      +' Set to "" if no 3\' flanking regions are expected. To run cutadapt, one or both of -3/-5 must be set.')
+    parser.add_option('-5','--adapter_5prime', metavar='SEQ', default=CASSETTE_DEFAULT_5prime, 
+                      help='adapter sequence(s) for 5\' flanking regions, to pass to cutadapt.  Default "%default".'
+                      +' Set to "" if no 5\' flanking regions are expected. To run cutadapt, one or both of -3/-5 must be set.'
+                      +' Can include multiple comma-separated sequence variants - the best match will be used for each read.')
+    parser.add_option('-3','--adapter_3prime', metavar='SEQ', default=CASSETTE_DEFAULT_3prime, 
+                      help='adapter sequence(s) for 3\' flanking regions, to pass to cutadapt.  Default "%default".'
+                      +' Set to "" if no 3\' flanking regions are expected. See -5 option help for more detail.')
     parser.add_option('-A','--other_cutadapt_options', metavar='"TEXT"', default='-e 0.1 -O 10 -n 1 -m 20 -M 21', 
                       help="Other options to pass to cutadapt (except adapter sequences - those are set with -5/-3), "
                       +'as a quoted string. Set to NONE to not run cutadapt. Default "%default". '
@@ -182,6 +194,7 @@ def main(args, options):
     """
     try:
         [infile] = args
+        # TODO multiple infiles would be nice!
     except ValueError:
         parser = define_option_parser()
         parser.print_help()
@@ -262,12 +275,14 @@ def main(args, options):
         # otherwise run the 5' and 3' ends separately
         else:
             cutadapt_readcount = {}
-            for (end_type, adapter_seq) in [("5'", options.adapter_5prime), ("3'", options.adapter_3prime)]:
+            for (end_type, adapter_seqs) in [("5'", options.adapter_5prime), ("3'", options.adapter_3prime)]:
                 assert end_type in ends
                 # if the adapter sequence for that side is empty, skip
-                if not adapter_seq.replace('"','').replace("'",'').replace(' ',''):  continue
+                adapter_seqs = adapter_seqs.replace('"','').replace("'",'').replace(' ','')
+                if not adapter_seqs:  continue
                 cutadapt_tmpfile = cutadapt_tmpfiles[end_type]
-                full_cutadapt_options = '-a %s %s'%(adapter_seq, options.other_cutadapt_options)
+                all_adapter_options = ' '.join(['-a %s'%seq for seq in adapter_seqs.split(',')])
+                full_cutadapt_options = all_adapter_options + ' ' + options.other_cutadapt_options
                 for extra_seq_category in ('untrimmed', 'too-short', 'too-long'):
                     if not extra_seq_category in full_cutadapt_options:
                         full_cutadapt_options += ' --%s-output %s'%(extra_seq_category, no_cassette_tmpfiles[end_type])
@@ -406,6 +421,9 @@ def do_test_run():
         ('end-5prime', "simpler test, 5' end only (collapsing to unique)", '-3 "" -C', [infile2]), 
         ('end-3prime', "simpler test, 3' end only (collapsing to unique)", '-5 "" -C', [infile2]), 
         ('ends-both', "simpler test, 5' and 3' ends (collapsing to unique)", '-C', [infile2]), 
+        # this test uses the standard 5' and 3' cassette seqs as two alternative 5' ones, so the 5' output is like ends-both 5'+3'
+        ('ends-two-5prime', "simpler test, two 5' adapters (collapsing to unique)", '-5 %s,%s -3 "" -C'%(
+                                                    CASSETTE_DEFAULT_5prime,CASSETTE_DEFAULT_3prime), [infile2]), 
         ]
     # MAYBE-TODO currently some of the tests are weird because fastx_collapser changes the order of the sequences for no good reason (see <IGNORE> lines in some of the files)
     # convert tests into (testname, arg_and_infile_string) format, adding the options that are always used

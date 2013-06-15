@@ -90,7 +90,7 @@ def write_SAM_line_from_HTSeq_aln(htseq_aln, OUTFILE):
 
 def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, 
                                     GENOMIC_UNIQUE_FILE, unaligned_as_fasta=True, multiple_to_write=-1, 
-                                    input_collapsed_to_unique=False, no_warnings=False):
+                                    input_collapsed_to_unique=False, no_multi_cassette_warnings=False):
     """ Decide the proper category for each read, write to appropriate output file; return category counts. 
     
     Categories: unaligned, cassette (one or more cassette alignments - print warning if multiple), 
@@ -128,11 +128,16 @@ def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSET
             if any([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]):
                 assert all([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]), "Mixed cassette/other!"
                 category_readcounts['cassette'] += readcount
-                if not no_warnings:
-                    print "Warning: multiple cassette alignments! Printing all to cassette file.\n\t%s"%(aln_list)
-                category_readcounts['cassette-multiple'] += readcount
-                for aln in aln_list:
-                    write_SAM_line_from_HTSeq_aln(aln, CASSETTE_FILE)
+                if not no_multi_cassette_warnings:
+                    print "Warning: multiple cassette alignments! Printing one to cassette file.\n\t%s"%(aln_list)
+                    category_readcounts['cassette-multiple'] += readcount
+                # first position alphabetically is chosen - MAYBE-TODO add other choice options?
+                aln_to_print = sorted(aln_list, key=lambda a: (a.iv.chrom, a.iv.strand, a.iv.start, a.iv.end))[0]
+                # just add _and_others to the chromosome - MAYBE-TODO add something more informative, like list of names?
+                #   but that would be tricky, need to strip matching prefixes from them, 
+                #   what about multiple alignments to SAME chromosome, etc.
+                aln_to_print.iv.chrom = aln_to_print.iv.chrom + '_and_others'
+                write_SAM_line_from_HTSeq_aln(aln_to_print, CASSETTE_FILE)
             # multiple genomic alignments - how many get written depends on multiple_to_write; 
             #  if it's 0, the outfile should be fasta, or else I guess it should be written as unaligned?
             #   (MAYBE-TODO writing single multiple as unaligned not implemented!)
@@ -190,6 +195,9 @@ def define_option_parser():
                       +"Default %default.")
     parser.add_option('-q', '--quiet', action="store_true", default=False,
                       help="Don't print anything to STDOUT, including warnings (default %default).")
+    parser.add_option('-W', '--no_multi_cassette_warnings', action="store_true", default=False,
+                      help="Don't print warnings when reads align to multiple positions in --cassette_bowtie_index. "
+                      +"(default %default).")
     # MAYBE-TODO more stdout verbosity levels?  Do I ever want the full bowtie output, or just the summary?  Summary seems fine...
 
     return parser
@@ -294,7 +302,7 @@ def main(args, options):
                 category_counts = categorize_reads_print_to_files(readname_to_aln_list, ALL_FILE, ALL_FILE, ALL_FILE, 
                                           ALL_FILE, unaligned_as_fasta=False, multiple_to_write=options.multiple_to_show, 
                                           input_collapsed_to_unique=options.input_collapsed_to_unique, 
-                                          no_warnings=options.quiet)
+                                          no_multi_cassette_warnings=options.no_multi_cassette_warnings)
         else:
             with open(outfile_unaligned, 'w') as UNALIGNED_FILE:
                 with open(outfile_cassette, 'w') as CASSETTE_FILE:
@@ -304,7 +312,7 @@ def main(args, options):
                                                       CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, 
                                                       unaligned_as_fasta=True, multiple_to_write=options.multiple_to_show, 
                                                       input_collapsed_to_unique=options.input_collapsed_to_unique, 
-                                                      no_warnings=options.quiet)
+                                                      no_multi_cassette_warnings=options.no_multi_cassette_warnings)
 
         ### print category_readcounts to INFOFILE in a nice way
         text1 = "\n### FINAL ALIGNMENT CATEGORY COUNTS"
@@ -362,10 +370,10 @@ def do_test_run():
     infile1 = "%s/INPUT_fasta_for_aln.fa"%test_folder
     # tests in (testname, [test_description,] arg_and_infile_string) format
     test_runs = [ 
-        ('aln__basic-1-error',         '-e 1 -m 3     -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q'%infile1),
-        ('aln__collapsed-input',       '-e 1 -m 3 -c  -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q'%infile1),
-        ('aln__show-multiple-0-fasta', '-e 1 -m 0     -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q'%infile1),
-        ('aln__dont-split',            '-e 1 -m 3  -s -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q'%infile1),
+        ('aln__basic-1-error',         '-e 1 -m 3     -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
+        ('aln__collapsed-input',       '-e 1 -m 3 -c  -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
+        ('aln__show-multiple-0-fasta', '-e 1 -m 0     -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
+        ('aln__dont-split',            '-e 1 -m 3  -s -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
     ]
     # MAYBE-TODO add run-tests for more options/combinations?
     

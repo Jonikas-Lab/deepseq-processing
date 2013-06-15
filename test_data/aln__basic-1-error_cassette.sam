@@ -1,3 +1,2 @@
 5_cassette_single-1	0	insertion_cassette_pMJ013b	1	255	21M	*	0	0	GTTGGAACCAATCGTCACACG	IIIIIIIIIIIIIIIIIIIII	XA:i:0	MD:Z:21	NM:i:0
-<REGEX>6_cassette_multiple_and_genome-1\t\d+\tinsertion_cassette_pMJ013b\t.*\tNM:i:0
-<REGEX>6_cassette_multiple_and_genome-1\t\d+\tinsertion_cassette_pMJ013b\t.*\tNM:i:0
+6_cassette_multiple_and_genome-1	0	insertion_cassette_pMJ013b_and_others	1	255	6M	*	0	0	GTTGGA	IIIIII	XA:i:0	MD:A:6	NM:i:0

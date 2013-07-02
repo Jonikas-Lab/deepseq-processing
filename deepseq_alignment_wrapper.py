@@ -167,7 +167,7 @@ def define_option_parser():
                           + "Ignores all other options/arguments. (default %default).")
 
     ### functionality options
-    parser.add_option('-G','--genome_bowtie_index', metavar='BASENAME', default='Chlre4nm_chl-mit',  
+    parser.add_option('-G','--genome_bowtie_index', metavar='BASENAME', default='Chlre5nm_chl-mit',  
                       help='Bowtie index file set to use for the genome (or everything combined). Default %default.')
     parser.add_option('-C','--cassette_bowtie_index', metavar='BASENAME', default='cassette-pMJ013b',  
                       help="Bowtie index file set to use for the insertion cassette; NONE to only use the index from -G. "

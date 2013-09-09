@@ -208,18 +208,27 @@ def main(args, options):
                  +" - use -5/-3 options to specify adapters instead!")
 
     ### outfile and tmpfile names
-    infile_suffix = os.path.splitext(infile)[1]
-    outfile_suffix = '.fa'
+    # outfile suffix is always fa because we always discard quality info right now, even when not forced to do that by collapsing to unique! MAYBE-TODO change that?
+    #infile_suffix = os.path.splitext(infile)[1]
     #outfile_suffix = '.fa' if options.collapse_to_unique else infile_suffix
-    ends = "5' 3'".split()
-    outfiles = {end: options.outfile_basename + '_%s.fa'%end.replace("'","prime") for end in ends}
+    outfile_suffix = '.fa'
     infofile = options.outfile_basename + '_info.txt'
     wrong_start_file = options.outfile_basename + '_wrong-start.fa'
-    no_cassette_tmpfiles = {end: options.outfile_basename + '_no-cassette-tmpfile_%s.fa'%end.replace("'","prime") for end in ends}
     no_cassette_file = options.outfile_basename + '_no-cassette.fa'
     trimmed_tmpfile = trimmed_tmpfile_original = options.outfile_basename + '_trimmed-tmpfile.fa'
-    cutadapt_tmpfiles = {end: options.outfile_basename + '_cutadapt-tmpfile_%s.fa'%end.replace("'","prime") for end in ends}
-    cutadapt_tmpfiles_original = cutadapt_tmpfiles
+    # outfiles and tmpfiles should be split by end ONLY if cutadapt is being run!
+    if options.other_cutadapt_options == 'NONE' or not (options.adapter_5prime or options.adapter_3prime):
+        outfiles = {'': options.outfile_basename + '.fa'}
+        no_cassette_tmpfiles = {'': options.outfile_basename + '_no-cassette-tmpfile.fa'}
+        cutadapt_tmpfiles = {'': options.outfile_basename + '_cutadapt-tmpfile.fa'}
+        cutadapt_tmpfiles_original = dict(cutadapt_tmpfiles)
+    else:
+        ends = "5' 3'".split()
+        outfiles = {end: options.outfile_basename + '_%s.fa'%end.replace("'","prime") for end in ends}
+        no_cassette_tmpfiles = {end: options.outfile_basename + '_no-cassette-tmpfile_%s.fa'%end.replace("'","prime") 
+                                for end in ends}
+        cutadapt_tmpfiles = {end: options.outfile_basename + '_cutadapt-tmpfile_%s.fa'%end.replace("'","prime") for end in ends}
+        cutadapt_tmpfiles_original = dict(cutadapt_tmpfiles)
     
     with open(infofile,'w') as INFOFILE:
 
@@ -269,7 +278,7 @@ def main(args, options):
         if not if_running_cutadapt:
             if options.verbosity>0:   print text
             INFOFILE.write(text+'\n')
-            cutadapt_tmpfile = trimmed_tmpfile
+            cutadapt_tmpfiles[''] = trimmed_tmpfile
             cutadapt_readcount = {'all': trimmed_readcount}
             no_cassette_readcount = 0
         # otherwise run the 5' and 3' ends separately

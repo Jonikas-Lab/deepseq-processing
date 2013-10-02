@@ -198,6 +198,9 @@ def define_option_parser():
     parser.add_option('-W', '--no_multi_cassette_warnings', action="store_true", default=False,
                       help="Don't print warnings when reads align to multiple positions in --cassette_bowtie_index. "
                       +"(default %default).")
+    parser.add_option('-k', '--keep_tmpfiles', action="store_true", default=False, 
+                      help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile, "
+                      +"plus _tmp*; for exact names see full commands printed to stdout and info file).")
     # MAYBE-TODO more stdout verbosity levels?  Do I ever want the full bowtie output, or just the summary?  Summary seems fine...
 
     return parser
@@ -292,9 +295,10 @@ def main(args, options):
         reduce_alignment_dict(readname_to_aln_list)
         prioritize_cassette_reads(readname_to_aln_list, if_cassette_function=is_cassette_chromosome)
         # delete alignment tmpfiles now that they've been parsed
-        os.remove(tmpfile_genome)
-        if options.cassette_bowtie_index != 'NONE':
-            os.remove(tmpfile_cassette)
+        if not options.keep_tmpfiles:
+            os.remove(tmpfile_genome)
+            if options.cassette_bowtie_index != 'NONE':
+                os.remove(tmpfile_cassette)
 
         ### Decide the proper category for each read, and write the info to appropriate final output files
         if options.dont_split_by_category:

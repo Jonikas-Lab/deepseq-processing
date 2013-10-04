@@ -40,47 +40,87 @@ from deepseq_utilities import check_mutation_count_try_all_methods
 from basic_seq_utilities import check_fasta_fastq_format, write_fasta_line, get_seq_count_from_collapsed_header
 from mutant_analysis_classes import is_cassette_chromosome
 
-
-def make_aln_dict_from_samfile(samfile, starting_dict=None):
-    """ Read SAM-format file, return read:alignment_object_list dict (optionally start with starting_dict); uses HTSeq. """
-    new_dict = defaultdict(lambda: [])
-    if starting_dict is not None:
-        new_dict.update(starting_dict)
+def aln_generator_from_single_samfile(samfile):
+    """ Generator - read SAM-format file (can have multiple alignments per read), yield (readname,alignment_object_list) tuples.
+    """
+    curr_readname, curr_aln_list = '', []
+    # go over alignments, adding to curr_aln_list until the readname changes - then yield finished data and start new one.
     for aln in HTSeq.SAM_Reader(samfile):
-        new_dict[aln.read.name] += [aln]
-    return dict(new_dict)
-
-
-def reduce_alignment_dict(readname_to_aln_list):
-    """ Given a readname:alignment_list dict, remove all alignments with more than minimum errors per read. """
-    for readname,aln_list in readname_to_aln_list.iteritems():
-        # nothing to be done for single alignments per read
-        if len(aln_list) == 1:
-            continue
-        # if there are multiple unaligned, just keep one, and go to the next read
-        if all([aln.aligned==False for aln in aln_list]):
-            readname_to_aln_list[readname] = aln_list[:1]
-            continue
-        # if there are aligned and unaligned reads, remove the unaligned, and keep going to the next step
+        readname = aln.read.name
+        if readname == curr_readname:
+            curr_aln_list.append(aln)
         else:
-            aln_list = [aln for aln in aln_list if aln.aligned] 
+            if curr_readname or curr_aln_list:
+                yield (curr_readname, curr_aln_list)
+            curr_readname, curr_aln_list = readname, [aln]
+    # remember to yield the last result too!
+    if curr_readname or curr_aln_list:
+        yield (curr_readname, curr_aln_list)
+    # TODO unit-test?
+
+
+def aln_generator_from_two_samfiles_parallel(samfile1, samfile2):
+    """ Generator - read multiple SAM-format files in parallel; yield (readname,alignment_object_list) tuples.
+
+    The multiple SAM-format files must be referring to the same set of reads!  Can have multiple alignments per read.
+
+    IN PARALLEL, return read:alignment_object_list dict (optionally start with starting_dict); uses HTSeq. 
+    """
+    samfile1_generator = aln_generator_from_single_samfile(samfile1)
+    samfile2_generator = aln_generator_from_single_samfile(samfile2)
+    file1_finished = False
+    while not file1_finished:
+        # grab data from file1, unless no more data
+        try:                    file1_readname, file1_aln_list = samfile1_generator.next()
+        except StopIteration:   file1_finished = True
+        # if there was data in file1, grab data from file2 (error if can't); 
+        #  if read names don't match, error; otherwise yield readname and joint alignment list.
+        if not file1_finished:
+            try:
+                file2_readname, file2_aln_list = samfile2_generator.next()
+            except StopIteration:   
+                raise Exception("File %s is finished, but file %s has more data! (read %s)"%(samfile2, samfile1, file1_readname))
+            if not file1_readname == file2_readname:
+                raise Exception("The files don't have the same reads in the same order! Reached %s in %s, but %s in %s."%(
+                    file1_readname, samfile1, file2_readname, samfile2))
+            yield file1_readname, file1_aln_list+file2_aln_list
+        # if file1 has no more data but file2 still does, error.
+        else:
+            file2_finished = False
+            try:                    file2_readname, file2_aln_list = samfile2_generator.next()
+            except StopIteration:   file2_finished = True
+            if not file2_finished:
+                raise Exception("File %s is finished, but file %s has more data! (read %s)"%(samfile1, samfile2, file2_readname))
+    # TODO unit-test?
+
+
+def reduce_alignment_list(aln_list):
+    """ Given an alignment list, return version without alignments with more than minimum errors per read. """
+    # nothing to be done for single alignments per read
+    if len(aln_list) == 1:
+        return aln_list
+    # if there are multiple unaligned, just keep one, and go to the next read
+    if all([aln.aligned==False for aln in aln_list]):
+        return aln_list[:1]
+    # if there are aligned and unaligned reads, remove the unaligned, and keep going to the next step
+    else:
+        aln_list = [aln for aln in aln_list if aln.aligned] 
         # if there are aligned reads with different numbers of errors, remove the ones with more than min errors
         min_errors = min([check_mutation_count_try_all_methods(aln) for aln in aln_list])
-        aln_list = [aln for aln in aln_list if check_mutation_count_try_all_methods(aln)==min_errors] 
-        # finally save the filtered aln_list back to the dictionary
-        readname_to_aln_list[readname] = aln_list
+        return [aln for aln in aln_list if check_mutation_count_try_all_methods(aln)==min_errors] 
 
 
-def prioritize_cassette_reads(readname_to_aln_list, if_cassette_function=is_cassette_chromosome):
-    """ Given a readname:alignment_list dict, whenever there's a cassette alignment, remove all other alignments. """
-    for readname,aln_list in readname_to_aln_list.iteritems():
-        # nothing to be done for single alignments per read
-        if len(aln_list) == 1:
-            continue
-        # if there are any cassette alignments, keep only the cassette alignments
-        if any([if_cassette_function(aln.iv.chrom) for aln in aln_list]):
-            aln_list = [aln for aln in aln_list if if_cassette_function(aln.iv.chrom)] 
-            readname_to_aln_list[readname] = aln_list
+def prioritize_cassette_reads(aln_list, if_cassette_function=is_cassette_chromosome):
+    """ If there are any cassette alignments on the list, return version with only cassette ones; otherwise return original."""
+    # if there's only one alignment, just leave it alone - no reason to do anything to it, 
+    #  and it might be unaligned, which would cause an error on the next line
+    if len(aln_list) == 1:
+        return aln_list
+    # if there are any cassette alignments, keep only the cassette alignments
+    elif any([if_cassette_function(aln.iv.chrom) for aln in aln_list]):
+        return [aln for aln in aln_list if if_cassette_function(aln.iv.chrom)] 
+    else:
+        return aln_list
 
 
 def write_SAM_line_from_HTSeq_aln(htseq_aln, OUTFILE):
@@ -88,10 +128,10 @@ def write_SAM_line_from_HTSeq_aln(htseq_aln, OUTFILE):
     OUTFILE.write(htseq_aln.get_sam_line().replace(' ','\t') + '\n')
 
 
-def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, 
-                                    GENOMIC_UNIQUE_FILE, unaligned_as_fasta=True, multiple_to_write=-1, 
+def categorize_reads_print_to_files(readname, aln_list, category_readcounts, UNALIGNED_FILE, CASSETTE_FILE, 
+                                    MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, unaligned_as_fasta=True, multiple_to_write=-1, 
                                     input_collapsed_to_unique=False, no_multi_cassette_warnings=False):
-    """ Decide the proper category for each read, write to appropriate output file; return category counts. 
+    """ Decide the proper category for the read, write to appropriate output file; adjust category counts. 
     
     Categories: unaligned, cassette (one or more cassette alignments - print warning if multiple), 
      genomic-unique (single non-cassette alignment), multiple-genomic (multiple non-cassette alignments. 
@@ -99,59 +139,58 @@ def categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, CASSET
      with N determined from readname using the fastx-collapser encoding.
     In the output category counts, cassette-multiple is a special subcategory - anything in it is also counted in cassette.
 
-    Each read is printed to the appropriate outfile (all outfiles should be open file handles); 
+    The read is printed to the appropriate outfile (all outfiles should be open file handles); 
      for multiple-genomic, multiple_to_write lines will be written; if unaligned_as_fasta, unaligned reads
      will be written as fasta instead of SAM format (and so will multiple-genomic if multiple_to_write is 0).
     """
-    category_readcounts = {'unaligned':0, 'cassette':0, 'multiple-genomic':0, 'genomic-unique':0, 'cassette-multiple':0}
-
-    for readname,aln_list in sorted(readname_to_aln_list.items()):
-        readcount = 1 if not input_collapsed_to_unique else get_seq_count_from_collapsed_header(readname)
-        # if there's a single alignment, it's unaligned, cassette or genomic-unique
-        if len(aln_list) == 1:
-            aln = aln_list[0]
-            if not aln.aligned:
-                category_readcounts['unaligned'] += readcount
-                if unaligned_as_fasta:  write_fasta_line(readname, aln.read.seq, UNALIGNED_FILE)
-                else:                   write_SAM_line_from_HTSeq_aln(aln, UNALIGNED_FILE)
-            elif is_cassette_chromosome(aln.iv.chrom):
-                category_readcounts['cassette'] += readcount
-                write_SAM_line_from_HTSeq_aln(aln, CASSETTE_FILE)
-            else:
-                category_readcounts['genomic-unique'] += readcount
-                write_SAM_line_from_HTSeq_aln(aln, GENOMIC_UNIQUE_FILE)
-        # if there are multiple alignments, it's cassette-multiple (weird!) or multiple-genomic
+    readcount = 1 if not input_collapsed_to_unique else get_seq_count_from_collapsed_header(readname)
+    # if there's a single alignment, it's unaligned, cassette or genomic-unique
+    if len(aln_list) == 1:
+        aln = aln_list[0]
+        if not aln.aligned:
+            category = 'unaligned'
+            if unaligned_as_fasta:  write_fasta_line(readname, aln.read.seq, UNALIGNED_FILE)
+            else:                   write_SAM_line_from_HTSeq_aln(aln, UNALIGNED_FILE)
+        elif is_cassette_chromosome(aln.iv.chrom):
+            category = 'cassette'
+            write_SAM_line_from_HTSeq_aln(aln, CASSETTE_FILE)
         else:
-            assert all([aln.aligned for aln in aln_list]), "Shouldn't see multiple unaligned lines per read!"
-            # multiple-cassette - shouldn't really happen, but write to CASSETTE_FILE
-            # MAYBE-TODO come up with something better to do for multiple-cassette cases? If they ever happen.
-            if any([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]):
-                assert all([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]), "Mixed cassette/other!"
-                category_readcounts['cassette'] += readcount
-                if not no_multi_cassette_warnings:
-                    print "Warning: multiple cassette alignments! Printing one to cassette file.\n\t%s"%(aln_list)
-                    category_readcounts['cassette-multiple'] += readcount
-                # first position alphabetically is chosen - MAYBE-TODO add other choice options?
-                aln_to_print = sorted(aln_list, key=lambda a: (a.iv.chrom, a.iv.strand, a.iv.start, a.iv.end))[0]
-                # just add _and_others to the chromosome - MAYBE-TODO add something more informative, like list of names?
-                #   but that would be tricky, need to strip matching prefixes from them, 
-                #   what about multiple alignments to SAME chromosome, etc.
-                aln_to_print.iv.chrom = aln_to_print.iv.chrom + '_and_others'
-                write_SAM_line_from_HTSeq_aln(aln_to_print, CASSETTE_FILE)
-            # multiple genomic alignments - how many get written depends on multiple_to_write; 
-            #  if it's 0, the outfile should be fasta, or else I guess it should be written as unaligned?
-            #   (MAYBE-TODO writing single multiple as unaligned not implemented!)
+            category = 'genomic-unique'
+            write_SAM_line_from_HTSeq_aln(aln, GENOMIC_UNIQUE_FILE)
+    # if there are multiple alignments, it's cassette-multiple (weird!) or multiple-genomic
+    else:
+        assert all([aln.aligned for aln in aln_list]), "Shouldn't see multiple unaligned lines per read!"
+        # multiple-cassette - shouldn't really happen, but write to CASSETTE_FILE
+        # MAYBE-TODO come up with something better to do for multiple-cassette cases? If they ever happen.
+        if any([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]):
+            assert all([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]), "Mixed cassette/other!"
+            if not no_multi_cassette_warnings:
+                print "Warning: multiple cassette alignments! Printing one to cassette file.\n\t%s"%(aln_list)
+                category = 'cassette-multiple'
             else:
-                category_readcounts['multiple-genomic'] += readcount
-                if multiple_to_write == 0:
-                    if unaligned_as_fasta:
-                        write_fasta_line(readname, aln_list[0].read.seq, MULTIPLE_GENOMIC_FILE)
-                    else:
-                        raise Exception("Writing 0 multiple alignments in SAM format NOT IMPLEMENTED!")
+                category = 'cassette'
+            # first position alphabetically is chosen - MAYBE-TODO add other choice options?
+            aln_to_print = sorted(aln_list, key=lambda a: (a.iv.chrom, a.iv.strand, a.iv.start, a.iv.end))[0]
+            # just add _and_others to the chromosome - MAYBE-TODO add something more informative, like list of names?
+            #   but that would be tricky, need to strip matching prefixes from them, 
+            #   what about multiple alignments to SAME chromosome, etc.
+            aln_to_print.iv.chrom = aln_to_print.iv.chrom + '_and_others'
+            write_SAM_line_from_HTSeq_aln(aln_to_print, CASSETTE_FILE)
+        # multiple genomic alignments - how many get written depends on multiple_to_write; 
+        #  if it's 0, the outfile should be fasta, or else I guess it should be written as unaligned?
+        #   (MAYBE-TODO writing single multiple as unaligned not implemented!)
+        else:
+            category = 'multiple-genomic'
+            if multiple_to_write == 0:
+                if unaligned_as_fasta:
+                    write_fasta_line(readname, aln_list[0].read.seq, MULTIPLE_GENOMIC_FILE)
                 else:
-                    for aln in aln_list[:multiple_to_write]:
-                        write_SAM_line_from_HTSeq_aln(aln, MULTIPLE_GENOMIC_FILE)
-    return category_readcounts
+                    raise Exception("Writing 0 multiple alignments in SAM format NOT IMPLEMENTED!")
+            else:
+                for aln in aln_list[:multiple_to_write]:
+                    write_SAM_line_from_HTSeq_aln(aln, MULTIPLE_GENOMIC_FILE)
+    category_readcounts[category] += readcount
+    return category
 
 
 def define_option_parser():
@@ -204,6 +243,7 @@ def define_option_parser():
     # MAYBE-TODO more stdout verbosity levels?  Do I ever want the full bowtie output, or just the summary?  Summary seems fine...
 
     return parser
+
 
 def main(args, options):
     """ Run the main functionality of the module (see module docstring for more information), excluding testing.
@@ -284,48 +324,54 @@ def main(args, options):
         # MAYBE-TODO make sure bowtie errors are printed to stdout even with -1?  Hard - bowtie is unfortunately ANNOYING 
         #  and uses stderr both for normal output and for errors, AND gives no returncode. 
 
-        ### Parse the two alignment files, and merge them together (remove sub-optimal alignments,
+        ### Parse the two alignment files in parallel, and merge them together (remove sub-optimal alignments,
         #    (and remove non-cassette ones if there are cassette ones with equal quality); remove alignment files.
-        readname_to_aln_list = make_aln_dict_from_samfile(tmpfile_genome)
+        #  Do all this WITHOUT reading the entire files into memory!  A bit tricky.
         if options.cassette_bowtie_index != 'NONE':
-            readname_to_aln_list = make_aln_dict_from_samfile(tmpfile_cassette, starting_dict=readname_to_aln_list)
-        # MAYBE-TODO right now I'm reading the entire files into memory before merging and processing them, 
-        #  which takes a fair amount of memory - could instead write something that would read both alignment files
-        #  in parallel and do the merging and output-writing read-by-read.  Do that if I start getting memory issues.
-        reduce_alignment_dict(readname_to_aln_list)
-        prioritize_cassette_reads(readname_to_aln_list, if_cassette_function=is_cassette_chromosome)
+            aln_list_generator = aln_generator_from_two_samfiles_parallel(tmpfile_genome, tmpfile_cassette)
+        else:
+            aln_list_generator = aln_generator_from_single_samfile(tmpfile_genome)
+        ### Decide the proper category for each read, and write the info to appropriate final output files
+        if options.dont_split_by_category:
+            GENOMIC_UNIQUE_FILE = MULTIPLE_GENOMIC_FILE = CASSETTE_FILE = UNALIGNED_FILE = open(outfile_all,'w')
+            unaligned_as_fasta = False
+        else:
+            UNALIGNED_FILE = open(outfile_unaligned, 'w')
+            CASSETTE_FILE = open(outfile_cassette, 'w')
+            MULTIPLE_GENOMIC_FILE = open(outfile_multiple_genomic, 'w')
+            GENOMIC_UNIQUE_FILE = open(outfile_genomic_unique, 'w')
+            unaligned_as_fasta = True
+        category_readcounts = {'unaligned':0, 'cassette':0, 'multiple-genomic':0, 'genomic-unique':0, 'cassette-multiple':0}
+        for (readname, full_aln_list) in aln_list_generator:
+            reduced_aln_list = reduce_alignment_list(full_aln_list)
+            final_aln_list = prioritize_cassette_reads(reduced_aln_list, if_cassette_function=is_cassette_chromosome)
+            categorize_reads_print_to_files(readname, final_aln_list, category_readcounts, UNALIGNED_FILE, CASSETTE_FILE, 
+                        MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, unaligned_as_fasta=unaligned_as_fasta, 
+                        multiple_to_write=options.multiple_to_show, input_collapsed_to_unique=options.input_collapsed_to_unique, 
+                        no_multi_cassette_warnings=options.no_multi_cassette_warnings)
+        if options.dont_split_by_category:
+            # all files are actually the same pointer, so only close once
+            GENOMIC_UNIQUE_FILE.close()
+        else:
+            UNALIGNED_FILE.close()
+            CASSETTE_FILE.close()
+            MULTIPLE_GENOMIC_FILE.close()
+            GENOMIC_UNIQUE_FILE.close()
+
         # delete alignment tmpfiles now that they've been parsed
         if not options.keep_tmpfiles:
             os.remove(tmpfile_genome)
             if options.cassette_bowtie_index != 'NONE':
                 os.remove(tmpfile_cassette)
 
-        ### Decide the proper category for each read, and write the info to appropriate final output files
-        if options.dont_split_by_category:
-            with open(outfile_all,'w') as ALL_FILE:
-                category_counts = categorize_reads_print_to_files(readname_to_aln_list, ALL_FILE, ALL_FILE, ALL_FILE, 
-                                          ALL_FILE, unaligned_as_fasta=False, multiple_to_write=options.multiple_to_show, 
-                                          input_collapsed_to_unique=options.input_collapsed_to_unique, 
-                                          no_multi_cassette_warnings=options.no_multi_cassette_warnings)
-        else:
-            with open(outfile_unaligned, 'w') as UNALIGNED_FILE:
-                with open(outfile_cassette, 'w') as CASSETTE_FILE:
-                    with open(outfile_multiple_genomic, 'w') as MULTIPLE_GENOMIC_FILE:
-                        with open(outfile_genomic_unique, 'w') as GENOMIC_UNIQUE_FILE:
-                            category_counts = categorize_reads_print_to_files(readname_to_aln_list, UNALIGNED_FILE, 
-                                                      CASSETTE_FILE, MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, 
-                                                      unaligned_as_fasta=True, multiple_to_write=options.multiple_to_show, 
-                                                      input_collapsed_to_unique=options.input_collapsed_to_unique, 
-                                                      no_multi_cassette_warnings=options.no_multi_cassette_warnings)
-
         ### print category_readcounts to INFOFILE in a nice way
         text1 = "\n### FINAL ALIGNMENT CATEGORY COUNTS"
-        cassette_multiple = category_counts.pop('cassette-multiple')
-        total_reads = sum(category_counts.values())
+        cassette_multiple = category_readcounts.pop('cassette-multiple')
+        total_reads = sum(category_readcounts.values())
         text2 = "# total reads:  %s"%total_reads
         if options.input_collapsed_to_unique: text2 +=" (uncollapsed readcounts)"
         lines = [text1, text2]
-        for category,count in sorted(category_counts.items()):
+        for category,count in sorted(category_readcounts.items()):
             text = "# %s:  %s"%(category, value_and_percentages(count, [total_reads]))
             if category=='cassette' and cassette_multiple:  
                 text += ' (Warning: %s multiple!!)'%cassette_multiple

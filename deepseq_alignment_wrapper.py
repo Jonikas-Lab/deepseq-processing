@@ -165,7 +165,8 @@ def categorize_reads_print_to_files(readname, aln_list, category_readcounts, UNA
         if any([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]):
             assert all([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]), "Mixed cassette/other!"
             if not no_multi_cassette_warnings:
-                print "Warning: multiple cassette alignments! Printing one to cassette file.\n\t%s"%(aln_list)
+                print ("Warning: multiple cassette alignments! Printing only one to cassette file. Seq %s, "%aln_list[0].read.seq, 
+                       "first 3 positions %s"%', '.join(["%s %s %s"%(a.iv.chrom, a.iv.strand, a.iv.start) for a in aln_list[:3]]))
                 category = 'cassette-multiple'
             else:
                 category = 'cassette'

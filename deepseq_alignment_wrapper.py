@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 """ Align sequences against index (using bowtie), categorize, write to one/multiple outfiles, write metadata to info file.
 
 Use the command-line options to specify bowtie options. For bowtie help, run "bowtie -h" on the command-line.  This program uses -v mode only.  

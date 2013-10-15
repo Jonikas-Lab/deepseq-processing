@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 """ Preprocessing of insertional-mutant deepseq reads: strip first bases (from adapter) and cassette sequence, filter by length, collapse to unique (all stages are optional and customizable). 
 
 1) Strip a given start sequence from each read; reads that didn't start with that sequence go in a separate file.

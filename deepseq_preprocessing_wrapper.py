@@ -59,15 +59,15 @@ def check_readcount(infile, OUTFILE=None, printing=True, description=None,
     to OUTFILE and/or stdout.  Return total number of reads. """
     if not os.path.exists(infile):    
         sys.exit("No %s file found! Exiting program. You should examine and/or remove the intermediate files."%infile)
-    read_count_data = seq_count_and_lengths.main([infile], total_read_number_only, input_collapsed_to_unique, 
-                                                 include_zeros=False, verbosity=1, OUTPUT=None)[2]
+    total_seqcount, total_seqlen_dict, formatted_output = seq_count_and_lengths.main([infile], total_read_number_only, 
+                                                                                     input_collapsed_to_unique, include_zeros=False, 
+                                                                                     verbosity=1, OUTPUT=None)
     if description is not None:     header = "# %s file (%s) data:"%(description, infile)
     else:                           header = "# %s file data:"%infile
-    output = "%s\n%s"%(header, ''.join(read_count_data))
+    output = "%s\n%s"%(header, ''.join(formatted_output))
     if OUTFILE is not None:     OUTFILE.write(output+'\n')
     if printing:                print output
-    read_count = int(read_count_data[-1].split(' ')[1])
-    return read_count
+    return total_seqcount
 
 
 def _trim_prefix_single(seqname, seq, prefix_bases, TRIMMED_OUTFILE, WRONG_PREFIX_OUTFILE=None):

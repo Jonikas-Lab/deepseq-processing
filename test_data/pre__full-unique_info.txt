@@ -4,6 +4,7 @@
 <REGEX># Full options: .*
 
 <REGEX># original input file \(.*\) data:
+Total 12 seqs
 length	seq count
 22	2
 24	2
@@ -12,7 +13,6 @@ length	seq count
 36	1
 37	2
 45	1
-Total 12 seqs
 
 <REGEX>### Trimming ACTA from start of each sequence in .* \(output to .*, untrimmed to .*\)
 
@@ -20,13 +20,13 @@ Trimmed sequences: 9 (75%)
 Untrimmed sequences: 3 (25%)
 
 <REGEX># first-base-trimming output file \(.*\) data:
+Total 9 seqs
 length	seq count
 20	2
 26	3
 32	1
 33	2
 41	1
-Total 9 seqs
 
 <REGEX>### Running cutadapt for 5': cutadapt_mod -a GTTGGAaccaat -e 0.1 -O 10 -n 1 -m 20 -M 21 .*
 
@@ -49,10 +49,10 @@ length	count
 12	6
 
 <REGEX># cutadapt output file \(.*\) data:
+Total 3 seqs
 length	seq count
 20	1
 21	2
-Total 3 seqs
 
 ### Merging the 5' and 3' cutadapt untrimmed outputs to get single no-cassette file.
 
@@ -62,10 +62,10 @@ Input: 3 sequences (representing 3 reads)
 Output: 2 sequences (representing 3 reads)
 
 <REGEX># fastx_collapser output file \(.*\) data:
+Total 2 seqs
 length	seq count
 20	1
 21	1
-Total 2 seqs
 
 (checked that all the reads are still there if you uncollapse the numbers using header info)
 

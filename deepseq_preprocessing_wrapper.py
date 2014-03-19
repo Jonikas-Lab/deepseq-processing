@@ -38,11 +38,8 @@ import sys, os
 import unittest
 # my modules
 from general_utilities import write_header_data, run_command_print_info_output, value_and_percentages
-from basic_seq_utilities import parse_fasta, write_fasta_line, name_seq_generator_from_fasta_fastq
+from basic_seq_utilities import parse_fasta, write_fasta_line, name_seq_generator_from_fasta_fastq, FASTQ_ENCODINGS_FASTX_TOOLKIT
 import seq_count_and_lengths
-
-
-FASTQ_ENCODINGS_FASTX_TOOLKIT = {'auto': '', 'sanger': '-Q33', 'illumina': '-Q64'}
 
 ### 5' and 3' ends of the different cassette variants we have
 CASSETTE_pMJ013b_5prime = 'GTTGGAaccaatcgtcacacgagccctcgtcagaaacacgtctccgccac'

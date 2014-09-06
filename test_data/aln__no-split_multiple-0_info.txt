@@ -1,0 +1,46 @@
+<REGEX># Command line this file was generated with: .*
+<REGEX># Path: .*
+<REGEX># Date: .*
+<REGEX># Full options: .*
+
+
+### Running bowtie: bowtie --version
+
+<REGEX>bowtie version .*
+<REGEX>.*-bit
+<REGEX>Built on .*
+<REGEX>.*
+<REGEX>Compiler: .*
+<REGEX>Options: .*
+<REGEX>Sizeof .*
+
+
+### Running bowtie: bowtie -v 1 -f -k 2 --strata --best --tryhard -S --sam-nosq Chlre4nm_chl-mit test_data/INPUT_fasta_for_aln.fa test_data/test_tmp_tmp_genome.sam
+
+# reads processed: 6
+# reads with at least one reported alignment: 4 (66.67%)
+# reads that failed to align: 2 (33.33%)
+Reported 7 alignments to 1 output stream(s)
+
+
+### Running bowtie: bowtie -v 1 -f --all --strata --best --tryhard -S --sam-nosq cassette-pMJ013b test_data/INPUT_fasta_for_aln.fa test_data/test_tmp_tmp_cassette.sam
+
+# reads processed: 6
+# reads with at least one reported alignment: 3 (50.00%)
+# reads that failed to align: 3 (50.00%)
+Reported 33 alignments to 1 output stream(s)
+
+
+### FINAL ALIGNMENT CATEGORY COUNTS
+# total reads:  6
+# cassette:  2 (33%)
+# genomic-unique:  1 (17%)
+# multiple-genomic:  2 (33%)
+# unaligned:  1 (17%)
+
+
+################## Metadata from input preprocessing ##################
+
+Automatically determining metadata input file name: test_data/INPUT_fasta_for_aln_info.txt
+
+### fake info file!

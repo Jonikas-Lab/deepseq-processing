@@ -129,19 +129,27 @@ def write_SAM_line_from_HTSeq_aln(htseq_aln, OUTFILE):
 
 
 def categorize_reads_print_to_files(readname, aln_list, category_readcounts, UNALIGNED_FILE, CASSETTE_FILE, 
-                                    MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, unaligned_as_fasta=True, multiple_to_write=-1, 
+                                    MULTIPLE_GENOMIC_FILE, GENOMIC_UNIQUE_FILE, unaligned_as_fasta=False, multiple_to_write=-1, 
                                     input_collapsed_to_unique=False, no_multi_cassette_warnings=False):
     """ Decide the proper category for the read, write to appropriate output file; adjust category counts. 
     
     Categories: unaligned, cassette (one or more cassette alignments - print warning if multiple), 
-     genomic-unique (single non-cassette alignment), multiple-genomic (multiple non-cassette alignments. 
+     genomic-unique (single non-cassette alignment), multiple-genomic (multiple non-cassette alignments). 
+
+    The reads will be categorized, and printed to the appropriate file (all the uppercase arguments should be open file objects; 
+     they can all be the SAME file object if desired.)
+
     If input_collapsed_to_unique, for the purpose of category counts each read will be counted as N reads, 
      with N determined from readname using the fastx-collapser encoding.
+
     In the output category counts, cassette-multiple is a special subcategory - anything in it is also counted in cassette.
 
     The read is printed to the appropriate outfile (all outfiles should be open file handles); 
-     for multiple-genomic, multiple_to_write lines will be written; if unaligned_as_fasta, unaligned reads
-     will be written as fasta instead of SAM format (and so will multiple-genomic if multiple_to_write is 0).
+     for multiple-genomic, only N=multiple_to_write lines will be written; if N=0, one line will be written that treats 
+      the read as unaligned, but with XM:i:M optional tag field added, where M is the number of multiple alignments.
+      
+    If unaligned_as_fasta, unaligned reads will be written as fasta instead of SAM format, 
+     and so will multiple if multiple_to_write is 0.
     """
     readcount = 1 if not input_collapsed_to_unique else get_seq_count_from_collapsed_header(readname)
     # if there's a single alignment, it's unaligned, cassette or genomic-unique
@@ -162,6 +170,7 @@ def categorize_reads_print_to_files(readname, aln_list, category_readcounts, UNA
         assert all([aln.aligned for aln in aln_list]), "Shouldn't see multiple unaligned lines per read!"
         # multiple-cassette - shouldn't really happen, but write to CASSETTE_FILE
         # MAYBE-TODO come up with something better to do for multiple-cassette cases? If they ever happen.
+        # (NOTE: sometimes they happen because I'm actually aligning to multiple cassettes - then they're fine.)
         if any([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]):
             assert all([is_cassette_chromosome(aln.iv.chrom) for aln in aln_list]), "Mixed cassette/other!"
             if not no_multi_cassette_warnings:
@@ -177,16 +186,20 @@ def categorize_reads_print_to_files(readname, aln_list, category_readcounts, UNA
             #   what about multiple alignments to SAME chromosome, etc.
             aln_to_print.iv.chrom = aln_to_print.iv.chrom + '_and_others'
             write_SAM_line_from_HTSeq_aln(aln_to_print, CASSETTE_FILE)
-        # multiple genomic alignments - how many get written depends on multiple_to_write; 
-        #  if it's 0, the outfile should be fasta, or else I guess it should be written as unaligned?
-        #   (MAYBE-TODO writing single multiple as unaligned not implemented!)
+        # multiple genomic alignments: 
+        # - if multiple_to_write=0, treat multiple as unaligned - if unaligned_as_fasta, print fasta line, 
+        #   else single unaligned SAM line, with XM:i:M optional tag field added, where M is the number of multiple alignments.
+        # - if multiple_to_write>0, print that many normal SAM lines for N alignments
+        # MAYBE-TODO add an option to write multiple as unaligned to the main SAM file AND full multiple lines to another file?
         else:
             category = 'multiple-genomic'
             if multiple_to_write == 0:
                 if unaligned_as_fasta:
                     write_fasta_line(readname, aln_list[0].read.seq, MULTIPLE_GENOMIC_FILE)
                 else:
-                    raise Exception("Writing 0 multiple alignments in SAM format NOT IMPLEMENTED!")
+                    aln = aln_list[0]
+                    MULTIPLE_GENOMIC_FILE.write('%s\t4\t*\t0\t0\t*\t*\t0\t0\t%s\t%s\tXM:i:%s\n'%(aln.read.name, aln.read.seq, 
+                                                                                                 aln.read.qualstr, len(aln_list)))
             else:
                 for aln in aln_list[:multiple_to_write]:
                     write_SAM_line_from_HTSeq_aln(aln, MULTIPLE_GENOMIC_FILE)
@@ -425,6 +438,7 @@ def do_test_run():
         ('aln__collapsed-input',       '-e 1 -m 3 -c  -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
         ('aln__show-multiple-0-fasta', '-e 1 -m 0     -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
         ('aln__dont-split',            '-e 1 -m 3  -s -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
+        ('aln__no-split_multiple-0',   '-e 1 -m 0  -s -G Chlre4nm_chl-mit -C cassette-pMJ013b %s -q -W'%infile1),
     ]
     # MAYBE-TODO add run-tests for more options/combinations?
     

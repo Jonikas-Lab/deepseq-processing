@@ -36,7 +36,7 @@ from collections import defaultdict
 import HTSeq
 # my modules
 from general_utilities import write_header_data, print_text_from_file, run_command_print_info_output, value_and_percentages
-from deepseq_utilities import check_mutation_count_try_all_methods
+from deepseq_utilities import check_mutation_count_by_optional_NM_field
 from basic_seq_utilities import check_fasta_fastq_format, write_fasta_line, get_seq_count_from_collapsed_header
 from mutant_analysis_classes import is_cassette_chromosome
 
@@ -106,8 +106,8 @@ def reduce_alignment_list(aln_list):
     else:
         aln_list = [aln for aln in aln_list if aln.aligned] 
         # if there are aligned reads with different numbers of errors, remove the ones with more than min errors
-        min_errors = min([check_mutation_count_try_all_methods(aln) for aln in aln_list])
-        return [aln for aln in aln_list if check_mutation_count_try_all_methods(aln)==min_errors] 
+        min_errors = min([check_mutation_count_by_optional_NM_field(aln, negative_if_absent=False) for aln in aln_list])
+        return [aln for aln in aln_list if check_mutation_count_by_optional_NM_field(aln, negative_if_absent=False)==min_errors] 
 
 
 def prioritize_cassette_reads(aln_list, if_cassette_function=is_cassette_chromosome):

@@ -251,9 +251,16 @@ def define_option_parser():
     parser.add_option('-W', '--no_multi_cassette_warnings', action="store_true", default=False,
                       help="Don't print warnings when reads align to multiple positions in --cassette_bowtie_index. "
                       +"(default %default).")
-    parser.add_option('-k', '--keep_tmpfiles', action="store_true", default=False, 
+    parser.add_option('--keep_tmpfiles', action="store_true", default=False, 
                       help="Don't delete the temporary/intermediate files (all will have the same prefix as the outfile, "
                       +"plus _tmp*; for exact names see full commands printed to stdout and info file).")
+    parser.add_option('--bowtie_aln_file_genome', default=None, 
+                      help="Instead of running bowtie against the genome, use provided file. Don't use this unless you know "
+                          +"what you're doing; it does NOT check that the input file is what it should be!")
+    parser.add_option('--bowtie_aln_file_cassette', default=None, 
+                      help="Instead of running bowtie against the cassette, use provided file. Don't use this unless you know "
+                          +"what you're doing; it does NOT check that the input file is what it should be!")
+    # TODO add tests for the --bowtie_aln_file_genome and --bowtie_aln_file_cassette options?
     # MAYBE-TODO more stdout verbosity levels?  Do I ever want the full bowtie output, or just the summary?  Summary seems fine...
 
     return parser
@@ -320,14 +327,33 @@ def main(args, options):
         INFOFILE.write('\n\n')
         command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, multiple_bowtie_option, 
                                       options.other_bowtie_options, options.genome_bowtie_index, infile, tmpfile_genome)
-        run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
+
+        if options.bowtie_aln_file_genome is None:
+            run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
+        else:
+            options.keep_tmpfiles = True
+            if not os.access(options.bowtie_aln_file_genome, os.R_OK):
+                raise Exception("Can't read provided options.bowtie_aln_file_genome %s!"%options.bowtie_aln_file_genome)
+            text = "UNUSUAL RUN: Instead of running \"%s\", using file %s."%(command, options.bowtie_aln_file_genome)
+            print text
+            INFOFILE.write('\n' + text + '\n')
+            tmpfile_genome = options.bowtie_aln_file_genome
 
         ### run bowtie vs the cassette index file if given
         if options.cassette_bowtie_index != 'NONE':
             INFOFILE.write('\n\n')
             command = "bowtie %s %s %s %s %s %s"%(specific_bowtie_options, '--all', options.other_bowtie_options, 
                                                   options.cassette_bowtie_index, infile, tmpfile_cassette)
-            run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
+            if options.bowtie_aln_file_cassette is None:
+                run_command_print_info_output(command, INFOFILE, printing_level=(not options.quiet), shell=True)
+            else:
+                options.keep_tmpfiles = True
+                if not os.access(options.bowtie_aln_file_cassette, os.R_OK):
+                    raise Exception("Can't read provided options.bowtie_aln_file_cassette %s!"%options.bowtie_aln_file_cassette)
+                text = "UNUSUAL RUN: Instead of running \"%s\", using file %s."%(command, options.bowtie_aln_file_cassette)
+                print text
+                INFOFILE.write('\n' + text + '\n')
+                tmpfile_cassette = options.bowtie_aln_file_cassette
 
         ### Check that bowtie runs worked
         missing_alnfile_text = "Bowtie run against %s failed! See above or %s file for bowtie error message."

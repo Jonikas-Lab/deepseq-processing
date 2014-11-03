@@ -228,7 +228,8 @@ def define_option_parser():
     parser.add_option('-e','--allowed_errors', type='int', metavar='N', default=1,  
                       help='How many mismatches to allow in alignments (bowtie -v option); max 3. Default %default.')
     parser.add_option('-m','--multiple_to_show', type='int', metavar='N', default=10,  
-                      help='How many multiple alignments to show (bowtie -k/-a option); -1 = no limit. Default %default.')
+                      help='How many multiple alignments to show (bowtie -k/-a option); -1 = no limit; 0 = treat as unaligned; '
+                          +'1 = show only one (dangerous - can look like uniquely aligned!). Default %default.')
     parser.add_option('-B','--other_bowtie_options',default='--strata --best --tryhard -S --sam-nosq', metavar='"TEXT"',
                       help="Remaining options to pass to bowtie, as a quoted string (-m and -v will be stripped - "
                       + " specify them separately as -m and -e).  Default \"%default\".")

@@ -15,6 +15,7 @@ import collections
 # other packages
 # my modules
 import basic_seq_utilities
+import general_utilities
 
 class CassetteStrippingError(Exception): pass
 
@@ -148,8 +149,9 @@ def do_test_run():
     infile1 = test_folder + '/INPUT_strip_cassette.fa'
     # tests in (testname, [test_description,] arg_and_infile_string) format
     test_runs = [
-        ('strip__basic', 'basic cassette-stripping', '-C tgtgtgtg -c 3 -l 4,5 -q %s'%infile1), 
+        ('strip__basic', 'basic cassette-stripping', '-C tgtgtgtg -c 3 -l 4,5 %s'%infile1), 
                 ]
+    # MAYBE-TODO add -1 back to the arguments if I add more tests?  Want to make sure the stdout part works though.
     # argument_converter converts (parser,options,args) to the correct argument order for main
     argument_converter = lambda parser,options,args: (args, options)
     # use my custom function to run all the tests, auto-detect reference files, compare to output.

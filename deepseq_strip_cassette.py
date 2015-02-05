@@ -120,13 +120,17 @@ def strip_cassette_from_file(infile, outfile_base, cassette_sequence, allowed_IB
                       OUTFILE_flank.write('>%s\n%s\n'%(name, flank))
                       OUTFILE_cassette.write('%s\t%s\n'%(name, cassette_len))
     if not quiet:
+        stripped_total = total_seqs - resuts_N_unstripped
         print "Total sequences:       %s"%total_seqs
+        print "Stripped sequences:    %s"%general_utilities.value_and_percentages(stripped_total, [total_seqs])
         print "Unstripped sequences:  %s (there may also be partially-stripped ones!)"%general_utilities.value_and_percentages(
                                                                                         resuts_N_unstripped, [total_seqs])
-        print "IB lengths:"
-        print '\n'.join("   %-7s: %s"%x for x in sorted(results_IB_lengths.items()))
-        print "Stripped cassette lengths:"
-        print '\n'.join("   %-7s: %s"%x for x in sorted(results_cassette_lengths.items()))
+        print "IB lengths and numbers of sequences (% of stripped):"
+        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
+                        for (length, N) in sorted(results_IB_lengths.items()))
+        print "Stripped cassette lengths and numbers of sequences (% of stripped):"
+        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
+                        for (length, N) in sorted(results_cassette_lengths.items()))
 
 
 def main(args, options):

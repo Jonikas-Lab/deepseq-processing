@@ -60,8 +60,8 @@ def strip_cassette_seq(input_seq, cassette_seq, IB_lens, min_len=5):
     If it's not found at all, return None.
     If it's found once, return a (seq_before_cassette, seq_after_cassette, cassette_length) tuple.
     """
-    cassette_seq = cassette_seq.lower()
-    input_seq = input_seq.lower()
+    cassette_seq = cassette_seq.upper()
+    input_seq = input_seq.upper()
     results = []
     for before_length in IB_lens:
         if_matched_bases = list(c==i for (c,i) in zip(cassette_seq, input_seq[before_length:]))
@@ -171,8 +171,8 @@ class Testing(unittest.TestCase):
         # cassette found
         for cassette in 'CC CCCCCCC cccccccc ccaaggggg CCATG'.split():
             for lens in ([2], [1,2,3], [2,10]):
-                self.assertEqual(strip_cassette_seq('aacctt', cassette, lens, 2), ('aa', 'tt', 2))
-        self.assertEqual(strip_cassette_seq('aacctt', 'cct', [1,2,3], 2), ('aa', 't', 3))
+                self.assertEqual(strip_cassette_seq('aacctt', cassette, lens, 2), ('AA', 'TT', 2))
+        self.assertEqual(strip_cassette_seq('aacctt', 'cct', [1,2,3], 2), ('AA', 'T', 3))
         # cassette not found
         for cassette in 'ctct aaa gactttt'.split():
             self.assertIsNone(strip_cassette_seq('aacctt', cassette, [2], 2))

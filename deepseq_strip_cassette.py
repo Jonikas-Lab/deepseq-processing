@@ -1,24 +1,30 @@
 #! /usr/bin/env python2.7
 
 """
-Take LEAP-Seq cassette-side read files (fastq), which should be <IB><cassette><genomic-flanking-seq>.  Look for the full or truncated cassette sequence after the expected IB length; output the IB and flanking seqs to separate fasta output files; output truncated cassette lengths to another output file, and a summary to stdout.
-Output files will be <outfile_base>_IB.fa, <outfile_base>_flank.fa, <outfile_base>_unstripped.fa and <outfile_base>_cassette-info.txt (tab-separated).
+Take LEAP-Seq cassette-side read files (fastq), which should be <IB><cassette><genomic-flanking-seq>, and look for the full or truncated cassette sequence after the expected IB length (using bowtie2); output the IB and flanking seqs to separate fasta output files; output truncated cassette lengths and error info to another output file, and a summary to stdout.
+Output files will be <outfile_base>_IB.fa, <outfile_base>_flank.fa, <outfile_base>_no-cassette.fa and <outfile_base>_cassette-info.txt (tab-separated).
  -- Weronika Patena, 2015
 USAGE: deepseq_strip_cassette [options] infile outfile_base
 """
 
 # standard library
 from __future__ import division
-import sys
+import sys, os
 import unittest
 import collections
 # other packages
 # my modules
 import basic_seq_utilities
 import general_utilities
+import deepseq_utilities
+
+DEFAULT_BOWTIE_OPTIONS = "--local --ma 3 --mp 5,5 --np 1 --rdg 5,3 --rfg 4,3 --score-min C,20,0 --all -N0 -L5 -i C,1,0 -R5 -D30 --norc --reorder"
+# to see how I figured those out, see ~//experiments/arrayed_library/1504_trying_new_cassette-trimming/notes.txt
+# this is REALLY WEIRD, but for some reason if I put "-N0 -L5" in the options it works, but in the other order "-L5 -N0" it doesn't work on the same test sequences... (truncated_20bp_cassette in test_data/INPUT_strip_cassette.fa)
+
+DEBUG = 0
 
 class CassetteStrippingError(Exception): pass
-
 
 def define_option_parser():
     """ Populates and returns an optparse option parser object, with __doc__ as the usage string."""
@@ -33,12 +39,23 @@ def define_option_parser():
                           + "Ignores all other options/arguments. (default %default).")
 
     ### functionality options
-    parser.add_option('-C', '--cassette_sequence', default=None, metavar='N',
-                      help="Expected assette sequence (default %default)")
-    parser.add_option('-c', '--min_cassette_length', type='int', default=5, metavar='N', 
-                      help="Minimum cassette length to expect (since we're allowing truncations) (default %default).")
-    parser.add_option('-l', '--allowed_IB_lengths', default='21,22,23', metavar='N,M', 
-                      help="How many bases before the cassette to expect (comma-separated numbers) (default %default).")
+    parser.add_option('-C', '--cassette_index', default=None, metavar='index',
+                      help="Bowtie2 index containing the expected cassette sequence (5' or 3')")
+    parser.add_option('-l', '--allowed_IB_lengths', default='21,23', metavar='N,M', 
+                      help="How many IB bases to expect before the cassette (format: 'min,max') (default %default).")
+    parser.add_option('-b', '--extra_bowtie_options', default="", metavar='"options"', 
+                      help="Additional bowtie options, which will be appended to the default options (%s) "%DEFAULT_BOWTIE_OPTIONS
+                          +"- the later options will supersede the earlier ones.")
+    parser.add_option('-m', '--min_cassette_length', type='int', default=10, metavar='N', 
+                      help="minimum length of detected cassette fragment (shorter = untrimmed) (default %default).")
+    parser.add_option('-i', '--N_ignore_end', type='int', default=30, metavar='N', 
+                      help="don't try to align N last bases to the cassette (default %default).")
+    parser.add_option('-e', '--max_percent_errors', type='int', default=30, metavar='N', 
+                      help="Maximum percent errors (default %default) - "
+                          +"NOTE that quality should mainly be determined through bowtie min-score, this is just a secondary check.")
+    parser.add_option('-n', '--n_threads', type='int', default=3, metavar='N', 
+                      help="number of threads to run bowtie as (default %default).")
+    # LATER-TODO add option to use a preexisting bowtie file
 
     ### cosmetic options
     parser.add_option('-q','--quiet', action='store_true', default=False, 
@@ -46,91 +63,147 @@ def define_option_parser():
     return parser
 
 
-def strip_cassette_seq(input_seq, cassette_seq, IB_lens, min_len=5):
-    """ Split input_seq into sections before and after cassette_seq, allowing cassette truncations.
-
-    The input_seq is expected to look like this: xxxxxxxxxCCCCCCCCCCCCCCCyyyyyyyy, 
-    where CCCCCCCCCC is either all of cassette_seq or a prefix of it (of at least min_len), 
-    and the length of xxxxxxxx is one of IB_lens. 
-
-    For each possible length in IB_lens, find the longest possible prefix of the 
-    cassette sequence at that position in input_seq, allowing no errors. 
-
-    If the cassette seq is found for multiple lengths, raise Exception.
-    If it's not found at all, return None.
-    If it's found once, return a (seq_before_cassette, seq_after_cassette, cassette_length) tuple.
+def run_bowtie(infile, bowtie_outfile, cassette_index, N_trim_start=0, N_trim_end=0, n_threads=1, extra_bowtie_options="", 
+               quiet=True):
+    """ Run bowtie2 to align infile against cassette_index, which should only contain the cassette seq expected in the reads.
     """
-    cassette_seq = cassette_seq.upper()
-    input_seq = input_seq.upper()
-    results = []
-    for before_length in IB_lens:
-        if_matched_bases = list(c==i for (c,i) in zip(cassette_seq, input_seq[before_length:]))
-        # this would probably be faster if I encoded these as large integers and used bitwise operations
-        try:                cassette_len = if_matched_bases.index(False)
-        except ValueError:  cassette_len = len(if_matched_bases)
-        if cassette_len >= min_len:
-            results.append((before_length, cassette_len))
-    if len(results) > 1:
-        raise CassetteStrippingError("Cassette %s found in seq %s in multiple (pos,length) pairs! %s"%(
-                                        cassette_seq, input_seq, results))
-    if not len(results):
-        return
-    before_length, cassette_len = results[0]
-    return input_seq[:before_length], input_seq[before_length+cassette_len:], cassette_len
-    # TODO implement allowing mismatches - slightly complicated, need to define a trade-off between #mismatches and length
-    # TODO implement allowing indels - more complicated, requires full alignment really - use Biopython?  Or even do an actual bowtie2 local alignment of each sequence to the expected cassette or something?
+    bowtie_command = "bowtie2 %s %s -5 %s -3 %s -p %s -x %s -U %s -S %s"%(DEFAULT_BOWTIE_OPTIONS, extra_bowtie_options, 
+                                                  N_trim_start, N_trim_end, n_threads, cassette_index, infile, bowtie_outfile)
+    if not quiet:
+        print "Bowtie command: %s"%bowtie_command
+    bowtie_output = general_utilities.run_command_get_output(bowtie_command, shell=True)
+    return bowtie_output
 
 
-def strip_cassette_from_file(infile, outfile_base, cassette_sequence, allowed_IB_lengths, 
-                             min_cassette_len=5, quiet=False):
-    """ Strip cassette seq from middles of LEAP-Seq reads, outputting starts/ends to outfiles. 
+def get_aln_startpos_from_CIGAR(CIGAR):
+    """ Return alignment start position (of the read, not the reference), 1-based - based on softclipping in CIGAR string.
+    """
+    return CIGAR[0].size+1 if CIGAR[0].type == 'S' else 1
+
+
+def get_aln_len_from_CIGAR(seqlen, CIGAR):
+    """ Return alignment length (of the read, not the reference) - based on readlen minus softclipping from CIGAR string.
+    """
+    return seqlen - sum(c.size for c in CIGAR if c.type=='S')
+
+
+def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors):
+    """ Return best alignment from a list of HTSeq-parsed SAM alignments, or None if unaligned or if none meet the criteria.
+
+    First, all valid alignments must meet the following criteria:
+        - the start position must be x+1, where x is one of allowed_start_positions
+        - the alignment length is at least min_cassette_length
+        - the edit distance is at most max_percent_errors of the alignment length
+    If there are no valid alignments (or no alignments at all), return None. 
+
+    Otherwise choose and return the best valid alignment:
+        - highest alignment score
+        - if multiple have the same score, pick the one with a longer read sequence being part of the alignment
+        - if there are still multiples, raise an exception.
+    """
+    # MAYBE-TODO also require the alignment to be in the correct area of the cassette?
+    # filter alignments to only get valid ones; if there aren't any, return None.
+    filtered_alignments = []
+    for aln in alignment_list:
+        if not aln.aligned:                             continue
+        startpos = get_aln_startpos_from_CIGAR(aln.cigar)
+        if startpos not in allowed_start_positions:     continue
+        aln_len = get_aln_len_from_CIGAR(len(aln.read), aln.cigar)
+        if aln_len < min_cassette_length:               continue
+        edit_dist = aln.optional_field('NM')
+        if edit_dist/aln_len*100 > max_percent_errors:  continue
+        filtered_alignments.append(aln)
+    if not filtered_alignments:
+        return None
+    # now try to find a single best alignment based on a ranked list of criteria; if there are multiple best, error.
+    max_score = max(aln.optional_field('AS') for aln in filtered_alignments)
+    filtered_alignments = [aln for aln in filtered_alignments if aln.optional_field('AS') == max_score]
+    if len(filtered_alignments) == 1:
+        return filtered_alignments[0]
+    max_aln_len = max(get_aln_len_from_CIGAR(len(aln.read), aln.cigar) for aln in filtered_alignments)
+    filtered_alignments = [aln for aln in filtered_alignments if get_aln_len_from_CIGAR(len(aln.read), aln.cigar) == max_aln_len]
+    if len(filtered_alignments) == 1:
+        return filtered_alignments[0]
+    else:
+        raise CassetteStrippingError("Multiple alignments with same quality and length! %s %s - "%(aln.read.name, aln.seq) 
+                                     +"showing CIGAR, NM and MD strings: " 
+                                     +', '.join("%s %s %s"%(aln.original_sam_line.split('\t')[5], aln.optional_field('NM'),  
+                                                            aln.optional_field('MD')) for aln in filtered_alignments))
+
+
+def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, min_cassette_length, max_percent_errors, 
+                             N_trim_start=0, N_trim_end=0, quiet=False):
+    """ 
+    Parse bowtie2 output file to separate infile seqs into IB,cassette,flank triples (or untrimmed cases)
     
-    Keep track of stripped cassette lengths, and print summary to stdout.
+    Keep track of stripped cassette lengths/errors, and print summary to stdout.
     """
-    if cassette_sequence is None:
-        raise CassetteStrippingError("Must provide cassette sequence!")
-    try:
-        if len(cassette_sequence) < min_cassette_len:
-            raise CassetteStrippingError("Cassette sequence must be longer than min_cassette_len! (%s, %s)"%(
-                                                                            min_cassette_len, cassette_sequence))
-    except TypeError:
-        raise CassetteStrippingError("Cassette sequence must be a string! (%s)"%cassette_sequence)
-    if type(allowed_IB_lengths) == str:
-        allowed_IB_lengths = [int(x) for x in allowed_IB_lengths.split(',')]
     total_seqs = 0
+    results_N_unstripped = 0
     results_IB_lengths = collections.Counter()
-    results_cassette_lengths = collections.Counter()
-    resuts_N_unstripped = 0
+    results_cassette_read_lengths = collections.Counter()
+    results_refstartpos = collections.Counter()
+    results_total_readlen, results_total_errors = 0, 0
+    # MAYBE-TODO count seqs with 0,1,2,3+ errors?
+    # MAYBE-TODO look at reference aligned lengths too? They can be different from read aligned lengths if there are indels.
+
     with open(outfile_base+'_cassette-info.txt', 'w') as OUTFILE_cassette:
-        OUTFILE_cassette.write("seq_header\tcassette_length\n")
+        OUTFILE_cassette.write("seq_header\tcassette_read_length\tIB_length\tcassette_seq"
+                               +"\tN_errors\trefstartpos\tCIGAR_field\tMD_field\talignment_score\n")
+        # MAYBE-TODO add more detailed error fields? #mismatches, #insertions, #deletions, total length of insertions and deletions
         with open(outfile_base+'_IB.fa', 'w') as OUTFILE_IB:
           with open(outfile_base+'_flank.fa', 'w') as OUTFILE_flank:
-            with open(outfile_base+'_unstripped.fa', 'w') as OUTFILE_unstripped:
-              for (name, seq) in basic_seq_utilities.name_seq_generator_from_fasta_fastq(infile):
-                  total_seqs += 1
-                  output = strip_cassette_seq(seq, cassette_sequence, allowed_IB_lengths, min_cassette_len)
-                  if output is None:
-                      resuts_N_unstripped += 1
-                      OUTFILE_unstripped.write('>%s\n%s\n'%(name, seq))
-                  else:
-                      IB, flank, cassette_len = output
-                      results_IB_lengths[len(IB)] += 1
-                      results_cassette_lengths[cassette_len] += 1
-                      OUTFILE_IB.write('>%s\n%s\n'%(name, IB))
-                      OUTFILE_flank.write('>%s\n%s\n'%(name, flank))
-                      OUTFILE_cassette.write('%s\t%s\n'%(name, cassette_len))
+            with open(outfile_base+'_no-cassette.fa', 'w') as OUTFILE_no_cassette:
+                # Need to parse the fastq infile in parallel with sam, because some first/last bases were trimmed before alignment
+                #  and we want them back in the IB/flank output.
+                for (name, seq, alignment_list) in deepseq_utilities.parse_fastx_sam_parallel(infile, bowtie_outfile):
+                    total_seqs += 1
+                    if DEBUG: print name
+                    # bowtie output will have multiple alignments per sequence - need to pick the best one.
+                    allowed_start_positions = [x-N_trim_start+1 for x in allowed_IB_lengths]    # +1 to make them 1-based
+                    aln = choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors)
+                    if DEBUG: print aln
+                    if aln is None:
+                        results_N_unstripped += 1
+                        OUTFILE_no_cassette.write('>%s\n%s\n'%(name, seq))
+                    else:
+                        aln_startpos = get_aln_startpos_from_CIGAR(aln.cigar)
+                        aln_len = get_aln_len_from_CIGAR(len(aln.read), aln.cigar)
+                        cassette_start = N_trim_start + aln_startpos
+                        cassette_end = cassette_start + aln_len - 1
+                        IB_seq = seq[:cassette_start-1]     # -1 because cassette_start is one-based
+                        cassette_seq = seq[cassette_start-1:cassette_end]
+                        flank_seq = seq[cassette_end:]
+                        CIGAR_string = aln.original_sam_line.split('\t')[5]
+                        edit_dist = aln.optional_field('NM')
+                        refstartpos = int(aln.original_sam_line.split('\t')[3])
+                        OUTFILE_IB.write('>%s\n%s\n'%(name, IB_seq))
+                        OUTFILE_flank.write('>%s\n%s\n'%(name, flank_seq))
+                        OUTFILE_cassette.write('%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n'%(name, aln_len, len(IB_seq), cassette_seq, 
+                                          edit_dist, refstartpos, CIGAR_string, aln.optional_field('MD'), aln.optional_field('AS')))
+                        results_total_readlen += aln_len
+                        results_total_errors += edit_dist
+                        results_IB_lengths[len(IB_seq)] += 1
+                        results_cassette_read_lengths[aln_len] += 1
+                        results_refstartpos[refstartpos] += 1
     if not quiet:
-        stripped_total = total_seqs - resuts_N_unstripped
-        print "Total sequences:       %s"%total_seqs
-        print "Stripped sequences:    %s"%general_utilities.value_and_percentages(stripped_total, [total_seqs])
-        print "Unstripped sequences:  %s (there may also be partially-stripped ones!)"%general_utilities.value_and_percentages(
-                                                                                        resuts_N_unstripped, [total_seqs])
-        print "IB lengths and numbers of sequences (% of stripped):"
+        stripped_total = total_seqs - results_N_unstripped
+        print "Total sequences:    %s"%total_seqs
+        print "Cassette found in:  %s"%general_utilities.value_and_percentages(stripped_total, [total_seqs])
+        print "Not found in:       %s"%general_utilities.value_and_percentages(results_N_unstripped, [total_seqs])
+        print "IB length distribution (% of cassette-found seqs):"
         print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
                         for (length, N) in sorted(results_IB_lengths.items()))
-        print "Stripped cassette lengths and numbers of sequences (% of stripped):"
+        print "Cassette length distribution (% of cassette-found seqs):"
         print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
-                        for (length, N) in sorted(results_cassette_lengths.items()))
+                        for (length, N) in sorted(results_cassette_read_lengths.items()))
+        print "First aligned cassette position distribution (% of cassette-found seqs):"
+        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
+                        for (length, N) in sorted(results_refstartpos.items()))
+        print "Overall %.2g%% errors in cassette alignments."%(results_total_errors/results_total_readlen*100)
+    return (total_seqs, results_N_unstripped, results_IB_lengths, results_cassette_read_lengths, results_refstartpos, 
+            results_total_readlen, results_total_errors)
+    # TODO run-test!!  Including multiple-alignment cases.
 
 
 def main(args, options):
@@ -142,42 +215,80 @@ def main(args, options):
     except ValueError:
         parser.print_help()
         sys.exit("\nError: exactly one infile and one outfile basename required!")
-    strip_cassette_from_file(infile, outfile_base, options.cassette_sequence, 
-                             options.allowed_IB_lengths, options.min_cassette_length, options.quiet)
+    allowed_min, allowed_max = [int(x) for x in options.allowed_IB_lengths.split(',')]
+    allowed_IB_lengths = range(allowed_min, allowed_max+1)
+    # the number of ignored bases has to be 1 lower than the shortest allowed IB, to distinguish it from too-short IBs
+    N_ignore_start = allowed_min - 1
+    bowtie_outfile = outfile_base + "_aligned.sam"
+    bowtie_output = run_bowtie(infile, bowtie_outfile, options.cassette_index, N_ignore_start, options.N_ignore_end, 
+                               options.n_threads, options.extra_bowtie_options, options.quiet)
+    output_summary = parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, options.min_cassette_length, 
+                                              options.max_percent_errors, N_ignore_start, options.N_ignore_end, options.quiet)
+
 
 
 def do_test_run():
     """ Test run: run script on test infile, compare output to reference file."""
     from testing_utilities import run_functional_tests
-    test_folder = "test_data"
-    infile1 = test_folder + '/INPUT_strip_cassette.fa'
     # tests in (testname, [test_description,] arg_and_infile_string) format
     test_runs = [
-        ('strip__basic', 'basic cassette-stripping', '-C tgtgtgtg -c 3 -l 4,5 %s'%infile1), 
+        ('strip__basic', 'basic cassette-stripping', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile1), 
+        ('strip__mism', 'cassette-stripping +mism', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile2), 
                 ]
+    # TODO indel tests
+    # TODO add tests to make sure the post-processing that picks the right alignment works correctly!
     # MAYBE-TODO add -1 back to the arguments if I add more tests?  Want to make sure the stdout part works though.
     # argument_converter converts (parser,options,args) to the correct argument order for main
     argument_converter = lambda parser,options,args: (args, options)
     # use my custom function to run all the tests, auto-detect reference files, compare to output.
-    return run_functional_tests(test_runs, define_option_parser(), main, test_folder, 
+    return run_functional_tests(test_runs, define_option_parser(), main, Testing.test_folder, 
                                 argument_converter=argument_converter) 
-    # LATER-TODO add run-tests!
 
 
 class Testing(unittest.TestCase):
     """ Runs unit-tests for this module. """
 
-    def test__strip_cassette_seq(self):
-        # cassette found
-        for cassette in 'CC CCCCCCC cccccccc ccaaggggg CCATG'.split():
-            for lens in ([2], [1,2,3], [2,10]):
-                self.assertEqual(strip_cassette_seq('aacctt', cassette, lens, 2), ('AA', 'TT', 2))
-        self.assertEqual(strip_cassette_seq('aacctt', 'cct', [1,2,3], 2), ('AA', 'T', 3))
-        # cassette not found
-        for cassette in 'ctct aaa gactttt'.split():
-            self.assertIsNone(strip_cassette_seq('aacctt', cassette, [2], 2))
-        # cassette found twice - error
-        self.assertRaises(CassetteStrippingError, strip_cassette_seq, 'aatttt', 'ttt', [2,3], 2)
+    test_folder = "test_data"
+    infile1 = test_folder + '/INPUT_strip_cassette_basic.fa'
+    infile2 = test_folder + '/INPUT_strip_cassette_mism.fa'
+    infile3 = test_folder + '/INPUT_strip_cassette_indel.fa'
+    infile3 = test_folder + '/INPUT_strip_cassette_extras.fa'
+
+    def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, refstartpos, total_errors):
+        bowtie_output = run_bowtie(infile, 'test_data/tmp.sam', 'expected-cassette-end_CIB1-3p', 20, 30, 1, "-f")
+        output_summary = parse_cassette_alignment(infile, 'test_data/tmp.sam', 'test_data/tmp', [21,22,23], 10, 30, 20, 30, True)
+        (total_seqs, results_N_unstripped, results_IB_lengths, results_cassette_read_lengths, results_refstartpos, 
+         results_total_readlen, results_total_errors) = output_summary
+        total_readlen = sum(x*y for (x,y) in cassette_readlens.items())
+        self.assertEqual(total_seqs, N_total)
+        self.assertEqual(results_N_unstripped, N_unstripped)
+        self.assertEqual(results_IB_lengths, IB_lengths)
+        self.assertEqual(results_cassette_read_lengths, cassette_readlens)
+        self.assertEqual(results_refstartpos, refstartpos)
+        self.assertEqual(results_total_readlen, total_readlen)
+        self.assertEqual(results_total_errors, total_errors)
+        # only remove files if all the results were correct
+        os.remove('test_data/tmp.sam')
+        os.remove('test_data/tmp_flank.fa')
+        os.remove('test_data/tmp_IB.fa')
+        os.remove('test_data/tmp_no-cassette.fa')
+        os.remove('test_data/tmp_cassette-info.txt')
+
+    def test__everything_summary(self):
+        self._run_test(Testing.infile1, 
+                       N_total = 11, N_unstripped = 4, 
+                       IB_lengths = {22: 5, 21:1, 23:1}, 
+                       cassette_readlens = {45: 3, 40:1, 30:1, 20:1, 10:1}, 
+                       refstartpos = {1: 7}, 
+                       total_errors = 0)
+        self._run_test(Testing.infile2, 
+                       N_total = 9, N_unstripped = 0, 
+                       IB_lengths = {22: 8, 23: 1}, 
+                       cassette_readlens = {45: 5, 44: 1, 43: 1, 22: 1, 16: 1}, 
+                       refstartpos = {1: 8, 2: 1}, 
+                       total_errors = 15)
+        # TODO add infile3 tests!
+        # TODO add infile4 tests!
 
 
 if __name__=='__main__':

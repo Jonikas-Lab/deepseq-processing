@@ -18,8 +18,8 @@ import basic_seq_utilities
 import general_utilities
 import deepseq_utilities
 
-DEFAULT_BOWTIE_OPTIONS = "--local --ma 3 --mp 5,5 --np 1 --rdg 5,3 --rfg 4,3 --score-min C,20,0 --all -N0 -L5 -i C,1,0 -R5 -D30 --norc --reorder"
-# to see how I figured those out, see ~//experiments/arrayed_library/1504_trying_new_cassette-trimming/notes.txt
+# to see how I figured out the default bowtie options, see ~//experiments/arrayed_library/1504_trying_new_cassette-trimming/notes.txt
+DEFAULT_BOWTIE_OPTIONS = "--local --all --ma 3 --mp 5,5 --np 1 --rdg 5,3 --rfg 4,3 --score-min C,20,0 -N0 -L5 -i C,1,0 -R5 -D30 --norc --reorder"
 # this is REALLY WEIRD, but for some reason if I put "-N0 -L5" in the options it works, but in the other order "-L5 -N0" it doesn't work on the same test sequences... (truncated_20bp_cassette in test_data/INPUT_strip_cassette.fa)
 
 DEBUG = 0
@@ -101,8 +101,8 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
         - if multiple have the same score, pick the one with a longer read sequence being part of the alignment
         - if there are still multiples, raise an exception.
     """
-    # MAYBE-TODO also require the alignment to be in the correct area of the cassette?
     # filter alignments to only get valid ones; if there aren't any, return None.
+    # MAYBE-TODO also require the alignment to be in the correct area of the cassette?
     filtered_alignments = []
     for aln in alignment_list:
         if not aln.aligned:                             continue
@@ -116,6 +116,10 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
     if not filtered_alignments:
         return None
     # now try to find a single best alignment based on a ranked list of criteria; if there are multiple best, error.
+    # NOTE that this should actually never be necessary, because it turns out that bowtie2 only returns all DISTINCT alignments, 
+    #   meaning ones that don't align the same read base to the same ref base - so to get multiple post-filter alns here, 
+    #   the read would have to have alignments to two different ref areas both starting at read position 22-24,
+    #   which is going to be impossible unless the alignments are only a few bp or the expected cassette seq is repetitive.
     max_score = max(aln.optional_field('AS') for aln in filtered_alignments)
     filtered_alignments = [aln for aln in filtered_alignments if aln.optional_field('AS') == max_score]
     if len(filtered_alignments) == 1:
@@ -150,6 +154,7 @@ def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_le
     with open(outfile_base+'_cassette-info.txt', 'w') as OUTFILE_cassette:
         OUTFILE_cassette.write("seq_header\tcassette_read_length\tIB_length\tcassette_seq"
                                +"\tN_errors\trefstartpos\tCIGAR_field\tMD_field\talignment_score\n")
+        # TODO add cassette_ref_length - that's the more relevant one for indels!
         # MAYBE-TODO add more detailed error fields? #mismatches, #insertions, #deletions, total length of insertions and deletions
         with open(outfile_base+'_IB.fa', 'w') as OUTFILE_IB:
           with open(outfile_base+'_flank.fa', 'w') as OUTFILE_flank:
@@ -222,6 +227,8 @@ def main(args, options):
     bowtie_outfile = outfile_base + "_aligned.sam"
     bowtie_output = run_bowtie(infile, bowtie_outfile, options.cassette_index, N_ignore_start, options.N_ignore_end, 
                                options.n_threads, options.extra_bowtie_options, options.quiet)
+    if not os.path.exists(bowtie_outfile):
+        raise CassetteStrippingError("\n\nERROR: bowtie failed!\n%s  %s  %s"%bowtie_output)
     output_summary = parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, options.min_cassette_length, 
                                               options.max_percent_errors, N_ignore_start, options.N_ignore_end, options.quiet)
 
@@ -234,10 +241,9 @@ def do_test_run():
     test_runs = [
         ('strip__basic', 'basic cassette-stripping', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile1), 
         ('strip__mism', 'cassette-stripping +mism', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile2), 
+        ('strip__indel', 'cassette-stripping +indel', '-C expected-cassette-end_CIB1-3p -b "-f" -e 100 -q %s'%Testing.infile3), 
                 ]
     # TODO indel tests
-    # TODO add tests to make sure the post-processing that picks the right alignment works correctly!
-    # MAYBE-TODO add -1 back to the arguments if I add more tests?  Want to make sure the stdout part works though.
     # argument_converter converts (parser,options,args) to the correct argument order for main
     argument_converter = lambda parser,options,args: (args, options)
     # use my custom function to run all the tests, auto-detect reference files, compare to output.
@@ -252,11 +258,16 @@ class Testing(unittest.TestCase):
     infile1 = test_folder + '/INPUT_strip_cassette_basic.fa'
     infile2 = test_folder + '/INPUT_strip_cassette_mism.fa'
     infile3 = test_folder + '/INPUT_strip_cassette_indel.fa'
-    infile3 = test_folder + '/INPUT_strip_cassette_extras.fa'
+    infile4 = test_folder + '/INPUT_strip_cassette_extras.fa'
+    # Note: INPUT_strip_cassette_indel.fa has multiple alignment cases (where there's a long indel in the middle, 
+    #           so either perfect half of the match has a higher score than the whole with the big indel); 
+    #       INPUT_strip_cassette_mism.fa DOESN'T, even though it has similar cases with a long mismatch - not sure why.
 
-    def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, refstartpos, total_errors):
+    def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, refstartpos, total_errors, 
+                  allowed_IB_lengths=[21,22,23], min_cass_len=10, max_percent_error=30):
         bowtie_output = run_bowtie(infile, 'test_data/tmp.sam', 'expected-cassette-end_CIB1-3p', 20, 30, 1, "-f")
-        output_summary = parse_cassette_alignment(infile, 'test_data/tmp.sam', 'test_data/tmp', [21,22,23], 10, 30, 20, 30, True)
+        output_summary = parse_cassette_alignment(infile, 'test_data/tmp.sam', 'test_data/tmp', 
+                                                  allowed_IB_lengths, min_cass_len, max_percent_error, 20, 30, True)
         (total_seqs, results_N_unstripped, results_IB_lengths, results_cassette_read_lengths, results_refstartpos, 
          results_total_readlen, results_total_errors) = output_summary
         total_readlen = sum(x*y for (x,y) in cassette_readlens.items())
@@ -275,20 +286,42 @@ class Testing(unittest.TestCase):
         os.remove('test_data/tmp_cassette-info.txt')
 
     def test__everything_summary(self):
+        # basic/truncated cases
         self._run_test(Testing.infile1, 
                        N_total = 11, N_unstripped = 4, 
                        IB_lengths = {22: 5, 21:1, 23:1}, 
                        cassette_readlens = {45: 3, 40:1, 30:1, 20:1, 10:1}, 
                        refstartpos = {1: 7}, 
                        total_errors = 0)
+        # mismatches
         self._run_test(Testing.infile2, 
                        N_total = 9, N_unstripped = 0, 
                        IB_lengths = {22: 8, 23: 1}, 
                        cassette_readlens = {45: 5, 44: 1, 43: 1, 22: 1, 16: 1}, 
                        refstartpos = {1: 8, 2: 1}, 
                        total_errors = 15)
-        # TODO add infile3 tests!
-        # TODO add infile4 tests!
+        # try different IB lengths to make sure that's working right
+        self._run_test(Testing.infile1, N_total = 11, N_unstripped = 9, IB_lengths = {23:1, 24:1}, 
+                       cassette_readlens = {45: 2}, refstartpos = {1: 2}, total_errors = 0, 
+                       allowed_IB_lengths=[23,24])
+        self._run_test(Testing.infile1, N_total = 11, N_unstripped = 11, IB_lengths = {}, 
+                       cassette_readlens = {}, refstartpos = {}, total_errors = 0, 
+                       allowed_IB_lengths=[25,30])
+        # try different min cassette lengths
+        self._run_test(Testing.infile1, N_total = 11, N_unstripped = 8, IB_lengths = {21:1, 22:1, 23:1}, 
+                       cassette_readlens = {45: 3}, refstartpos = {1: 3}, total_errors = 0, 
+                       min_cass_len=45)
+        self._run_test(Testing.infile1, N_total = 11, N_unstripped = 7, IB_lengths = {21:1, 22:2, 23:1}, 
+                       cassette_readlens = {45: 3, 40:1}, refstartpos = {1: 4}, total_errors = 0, 
+                       min_cass_len=40)
+        # try different max_percent_error values
+        self._run_test(Testing.infile2, N_total = 9, N_unstripped = 5, IB_lengths = {22: 3, 23: 1}, 
+                       cassette_readlens = {44:1, 43:1, 22:1, 16:1}, refstartpos = {1: 3, 2: 1}, total_errors = 0, 
+                       max_percent_error=0)
+        self._run_test(Testing.infile2, N_total = 9, N_unstripped = 2, IB_lengths = {22: 6, 23: 1}, 
+                       cassette_readlens = {45: 3, 44: 1, 43: 1, 22: 1, 16: 1}, refstartpos = {1: 6, 2: 1}, total_errors = 3,
+                       max_percent_error=3)
+        # not testing infile3 and infile4 - they have detailed tests, and all the summary stuff has already been tested here.
 
 
 if __name__=='__main__':

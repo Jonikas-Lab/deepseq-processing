@@ -60,7 +60,6 @@ def define_option_parser():
                       help="Highest cassette position the alignment can start at (default %default).")
     parser.add_option('-n', '--n_threads', type='int', default=3, metavar='N', 
                       help="number of threads to run bowtie as (default %default).")
-    # LATER-TODO add option to use a preexisting bowtie file
 
     ### cosmetic options
     parser.add_option('-q','--quiet', action='store_true', default=False, 
@@ -109,7 +108,6 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
         - if there are still multiples, raise an exception.
     """
     # filter alignments to only get valid ones; if there aren't any, return None.
-    # MAYBE-TODO also require the alignment to be in the correct area of the cassette?
     filtered_alignments = []
     for aln in alignment_list:
         if not aln.aligned:                             continue

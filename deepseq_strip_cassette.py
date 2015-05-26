@@ -129,7 +129,7 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
     if len(filtered_alignments) == 1:
         return filtered_alignments[0]
     else:
-        raise CassetteStrippingError("Multiple alignments with same quality and length! %s %s - "%(aln.read.name, aln.seq) 
+        raise CassetteStrippingError("Multiple alignments with same quality and length! %s %s - "%(aln.read.name, aln.read.seq) 
                                      +"showing CIGAR, NM and MD strings: " 
                                      +', '.join("%s %s %s"%(aln.original_sam_line.split('\t')[5], aln.optional_field('NM'),  
                                                             aln.optional_field('MD')) for aln in filtered_alignments))

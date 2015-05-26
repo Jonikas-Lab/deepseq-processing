@@ -46,6 +46,9 @@ def define_option_parser():
     parser.add_option('-b', '--extra_bowtie_options', default="", metavar='"options"', 
                       help="Additional bowtie options, which will be appended to the default options (%s) "%DEFAULT_BOWTIE_OPTIONS
                           +"- the later options will supersede the earlier ones.")
+    parser.add_option('-B', '--existing_bowtie_file', default=None, metavar='samfile',
+                      help="Existing bowtie2 output file to use instead of running bowtie2 (default %default). "
+                          +"Make sure it was run with the same parameters as this! (-x = -C, -3 = -i, =5 = -l[0] minus one)")
     parser.add_option('-m', '--min_cassette_length', type='int', default=10, metavar='N', 
                       help="minimum length of detected cassette fragment (shorter = untrimmed) (default %default).")
     parser.add_option('-i', '--N_ignore_end', type='int', default=30, metavar='N', 
@@ -229,14 +232,18 @@ def main(args, options):
     allowed_IB_lengths = range(allowed_min, allowed_max+1)
     # the number of ignored bases has to be 1 lower than the shortest allowed IB, to distinguish it from too-short IBs
     N_ignore_start = allowed_min - 1
-    bowtie_outfile = outfile_base + "_aligned.sam"
-    bowtie_output = run_bowtie(infile, bowtie_outfile, options.cassette_index, N_ignore_start, options.N_ignore_end, 
-                               options.n_threads, options.extra_bowtie_options, options.quiet)
-    if not os.path.exists(bowtie_outfile):
-        raise CassetteStrippingError("\n\nERROR: bowtie failed!\n%s  %s  %s"%bowtie_output)
+    if options.existing_bowtie_file:
+        bowtie_outfile = options.existing_bowtie_file
+        if not os.path.exists(bowtie_outfile):
+            raise CassetteStrippingError("ERROR: provided bowtie file %s doesn't exit!"%bowtie_outfile)
+    else:
+        bowtie_outfile = outfile_base + "_aligned.sam"
+        bowtie_output = run_bowtie(infile, bowtie_outfile, options.cassette_index, N_ignore_start, options.N_ignore_end, 
+                                   options.n_threads, options.extra_bowtie_options, options.quiet)
+        if not os.path.exists(bowtie_outfile):
+            raise CassetteStrippingError("\n\nERROR: bowtie failed!\n%s  %s  %s"%bowtie_output)
     output_summary = parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, options.min_cassette_length, 
                                               options.max_percent_errors, N_ignore_start, options.N_ignore_end, options.quiet)
-
 
 
 def do_test_run():

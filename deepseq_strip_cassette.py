@@ -152,6 +152,13 @@ def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_le
     total_seqs = 0
     results_N_unstripped = 0
     results_IB_lengths = collections.Counter()
+    # use length ranges for results_cassette_read_lengths and results_reflengths, to avoid huge result lists
+    length_ranges = {}
+    for i in range(21):     length_ranges[i] = '0-20'
+    for i in range(21, 31): length_ranges[i] = '21-30'
+    for i in range(31, 41): length_ranges[i] = '31-40'
+    for i in range(41, 46): length_ranges[i] = i
+    for i in range(46, 80): length_ranges[i] = '46+'
     results_cassette_read_lengths = collections.Counter()
     results_reflengths = collections.Counter()
     results_refstartpos = collections.Counter()
@@ -199,27 +206,24 @@ def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_le
                         results_total_readlen += aln_len
                         results_total_errors += edit_dist
                         results_IB_lengths[len(IB_seq)] += 1
-                        results_cassette_read_lengths[aln_len] += 1
-                        results_reflengths[ref_len] += 1
+                        results_cassette_read_lengths[length_ranges[aln_len]] += 1
+                        results_reflengths[length_ranges[ref_len]] += 1
                         results_refstartpos[ref_startpos] += 1
     if not quiet:
         stripped_total = total_seqs - results_N_unstripped
+        valp = general_utilities.value_and_percentages
         print "Total sequences:    %s"%total_seqs
-        print "Cassette found in:  %s"%general_utilities.value_and_percentages(stripped_total, [total_seqs])
-        print "Not found in:       %s"%general_utilities.value_and_percentages(results_N_unstripped, [total_seqs])
+        print "Cassette found in:  %s"%valp(stripped_total, [total_seqs])
+        print "Not found in:       %s"%valp(results_N_unstripped, [total_seqs])
         print "IB length distribution (% of cassette-found seqs):"
-        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
-                        for (length, N) in sorted(results_IB_lengths.items()))
-        print "Cassette-aligned read length distribution (% of cassette-found seqs):"
-        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
-                        for (length, N) in sorted(results_cassette_read_lengths.items()))
-        print " and the matching cassette alignment length distribution (will be different if indels):"
-        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
-                        for (length, N) in sorted(results_reflengths.items()))
+        print '\n'.join("   %-15s  %s"%(length, valp(N, [stripped_total])) for (length, N) in sorted(results_IB_lengths.items()))
+        print "Alignment length distribution - read, cassette (% of cassette-found seqs):"
+        all_lengths = sorted(set(results_cassette_read_lengths.keys() + results_reflengths.keys()), key=str)
+        print '\n'.join("   %-15s  %-15s %s"%(L, valp(results_cassette_read_lengths[L], [stripped_total]), 
+                                              valp(results_reflengths[L], [stripped_total])) for L in all_lengths)
         print "First aligned cassette position distribution (% of cassette-found seqs):"
-        print '\n'.join("   %-7s  %s"%(length, general_utilities.value_and_percentages(N, [stripped_total]))
-                        for (length, N) in sorted(results_refstartpos.items()))
-        print "Overall %.2g%% errors in cassette alignments."%(results_total_errors/results_total_readlen*100)
+        print '\n'.join("   %-15s  %s"%(length, valp(N, [stripped_total])) for (length, N) in sorted(results_refstartpos.items()))
+        print "Overall error rate: %.2g%%"%(results_total_errors/results_total_readlen*100)
     return (total_seqs, results_N_unstripped, results_IB_lengths, results_cassette_read_lengths, results_reflengths, 
             results_refstartpos, results_total_readlen, results_total_errors)
 
@@ -256,10 +260,11 @@ def do_test_run():
     """ Test run: run script on test infile, compare output to reference file."""
     from testing_utilities import run_functional_tests
     # tests in (testname, [test_description,] arg_and_infile_string) format
+    # running the last test without -q to see the command-line output formatting
     test_runs = [
         ('strip__basic', 'basic cassette-stripping', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile1), 
         ('strip__mism', 'cassette-stripping +mism', '-C expected-cassette-end_CIB1-3p -b "-f" -q %s'%Testing.infile2), 
-        ('strip__indel', 'cassette-stripping +indel', '-C expected-cassette-end_CIB1-3p -b "-f" -e 100 -q %s'%Testing.infile3), 
+        ('strip__indel', 'cassette-stripping +indel', '-C expected-cassette-end_CIB1-3p -b "-f" -e 100 %s'%Testing.infile3), 
                 ]
     # argument_converter converts (parser,options,args) to the correct argument order for main
     argument_converter = lambda parser,options,args: (args, options)
@@ -280,8 +285,8 @@ class Testing(unittest.TestCase):
     #           so either perfect half of the match has a higher score than the whole with the big indel); 
     #       INPUT_strip_cassette_mism.fa DOESN'T, even though it has similar cases with a long mismatch - not sure why.
 
-    def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, reflens=None, refstartpos=None, 
-                  total_errors=0, allowed_IB_lengths=[21,22,23], min_cass_len=10, max_percent_error=30, max_start=5):
+    def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, reflens, refstartpos, 
+                  total_readlen, total_errors=0, allowed_IB_lengths=[21,22,23], min_cass_len=10, max_percent_error=30, max_start=5):
         bowtie_output = run_bowtie(infile, 'test_data/tmp.sam', 'expected-cassette-end_CIB1-3p', 20, 30, 1, "-f")
         output_summary = parse_cassette_alignment(infile, 'test_data/tmp.sam', 'test_data/tmp', 
                                                   allowed_IB_lengths, min_cass_len, max_percent_error, max_start, 20, 30, True)
@@ -291,7 +296,6 @@ class Testing(unittest.TestCase):
             reflens = cassette_readlens
         if refstartpos is None:
             refstartpos = {1: N_total}
-        total_readlen = sum(x*y for (x,y) in cassette_readlens.items())
         self.assertEqual(total_seqs, N_total)
         self.assertEqual(results_N_unstripped, N_unstripped)
         self.assertEqual(results_IB_lengths, IB_lengths)
@@ -312,43 +316,45 @@ class Testing(unittest.TestCase):
         self._run_test(Testing.infile1, 
                        N_total = 11, N_unstripped = 4, 
                        IB_lengths = {22: 5, 21:1, 23:1}, 
-                       cassette_readlens = {45: 3, 40:1, 30:1, 20:1, 10:1}, reflens = None, 
+                       cassette_readlens = {45: 3, '31-40':1, '21-30':1, '0-20':2}, reflens = None, 
                        refstartpos = {1: 7}, 
-                       total_errors = 0)
+                       total_readlen = 235, total_errors = 0)
         # mismatches
         self._run_test(Testing.infile2, 
                        N_total = 9, N_unstripped = 0, 
                        IB_lengths = {22: 8, 23: 1}, 
-                       cassette_readlens = {45: 5, 44: 1, 43: 1, 22: 1, 16: 1}, reflens = None, 
+                       cassette_readlens = {45: 5, 44: 1, 43: 1, '21-30': 1, '0-20': 1}, reflens = None, 
                        refstartpos = {1: 8, 2: 1}, 
-                       total_errors = 15)
+                       total_readlen = 350, total_errors = 15)
         # try different IB lengths to make sure that's working right
         self._run_test(Testing.infile1, N_total = 11, N_unstripped = 9, IB_lengths = {23:1, 24:1}, 
-                       cassette_readlens = {45: 2}, reflens = None, refstartpos = {1: 2}, total_errors = 0, 
+                       cassette_readlens = {45: 2}, reflens = None, refstartpos = {1: 2}, total_readlen = 90, total_errors = 0, 
                        allowed_IB_lengths=[23,24])
         self._run_test(Testing.infile1, N_total = 11, N_unstripped = 11, IB_lengths = {}, 
-                       cassette_readlens = {}, reflens = None, refstartpos = {}, total_errors = 0, 
+                       cassette_readlens = {}, reflens = None, refstartpos = {}, total_readlen = 0, total_errors = 0, 
                        allowed_IB_lengths=[25,30])
         # try different min cassette lengths
         self._run_test(Testing.infile1, N_total = 11, N_unstripped = 8, IB_lengths = {21:1, 22:1, 23:1}, 
-                       cassette_readlens = {45: 3}, reflens = None, refstartpos = {1: 3}, total_errors = 0, 
+                       cassette_readlens = {45: 3}, reflens = None, refstartpos = {1: 3}, total_readlen = 135, total_errors = 0, 
                        min_cass_len=45)
         self._run_test(Testing.infile1, N_total = 11, N_unstripped = 7, IB_lengths = {21:1, 22:2, 23:1}, 
-                       cassette_readlens = {45: 3, 40:1}, reflens = None, refstartpos = {1: 4}, total_errors = 0, 
+                       cassette_readlens = {45: 3, '31-40':1}, reflens = None, 
+                       refstartpos = {1: 4}, total_readlen = 175, total_errors = 0, 
                        min_cass_len=40)
         # try different max_percent_error values
         self._run_test(Testing.infile2, N_total = 9, N_unstripped = 5, IB_lengths = {22: 3, 23: 1}, 
-                       cassette_readlens = {44:1, 43:1, 22:1, 16:1}, reflens = None, refstartpos = {1: 3, 2: 1}, total_errors = 0, 
+                       cassette_readlens = {44:1, 43:1, '21-30':1, '0-20':1}, reflens = None, 
+                       refstartpos = {1: 3, 2: 1}, total_readlen = 125, total_errors = 0, 
                        max_percent_error=0)
         self._run_test(Testing.infile2, N_total = 9, N_unstripped = 2, IB_lengths = {22: 6, 23: 1}, 
-                       cassette_readlens = {45: 3, 44: 1, 43: 1, 22: 1, 16: 1}, reflens = None, 
-                       refstartpos = {1: 6, 2: 1}, total_errors = 3,
+                       cassette_readlens = {45: 3, 44: 1, 43: 1, '21-30': 1, '0-20': 1}, reflens = None, 
+                       refstartpos = {1: 6, 2: 1}, total_readlen = 260, total_errors = 3,
                        max_percent_error=3)
         # try different max_allowed_cassette_start values
         self._run_test(Testing.infile2, 
                        N_total = 9, N_unstripped = 1, IB_lengths = {22: 8}, 
-                       cassette_readlens = {45: 5, 43: 1, 22: 1, 16: 1}, reflens = None, 
-                       refstartpos = {1: 8}, total_errors = 15, 
+                       cassette_readlens = {45: 5, 43: 1, '21-30': 1, '0-20': 1}, reflens = None, 
+                       refstartpos = {1: 8}, total_readlen = 306, total_errors = 15, 
                        max_start=1)
         # not testing infile3 and infile4 - they have detailed tests, and all the summary stuff has already been tested here.
 

@@ -153,6 +153,7 @@ def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_le
     results_N_unstripped = 0
     results_IB_lengths = collections.Counter()
     # use length ranges for results_cassette_read_lengths and results_reflengths, to avoid huge result lists
+    # MAYBE-TODO add a check for any unusually common lengths in each range?  Or include BOTH ranges and singles?
     length_ranges = {}
     for i in range(21):     length_ranges[i] = '0-20'
     for i in range(21, 31): length_ranges[i] = '21-30'

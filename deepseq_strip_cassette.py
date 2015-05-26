@@ -56,6 +56,8 @@ def define_option_parser():
     parser.add_option('-e', '--max_percent_errors', type='int', default=30, metavar='N', 
                       help="Maximum percent errors (default %default) - "
                           +"NOTE that quality should mainly be determined through bowtie min-score, this is just a secondary check.")
+    parser.add_option('-s', '--max_allowed_cassette_start', type='int', default=5, metavar='N', 
+                      help="Highest cassette position the alignment can start at (default %default).")
     parser.add_option('-n', '--n_threads', type='int', default=3, metavar='N', 
                       help="number of threads to run bowtie as (default %default).")
     # LATER-TODO add option to use a preexisting bowtie file
@@ -90,11 +92,13 @@ def get_aln_len_from_CIGAR(seqlen, CIGAR):
     return seqlen - sum(c.size for c in CIGAR if c.type=='S')
 
 
-def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors):
+def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors, 
+                          max_allowed_cassette_start):
     """ Return best alignment from a list of HTSeq-parsed SAM alignments, or None if unaligned or if none meet the criteria.
 
     First, all valid alignments must meet the following criteria:
-        - the start position must be x+1, where x is one of allowed_start_positions
+        - the alignment start position in the READ must be x+1, where x is one of allowed_start_positions
+        - the alignment start position in the REFERENCE must be at most max_allowed_cassette_start
         - the alignment length is at least min_cassette_length
         - the edit distance is at most max_percent_errors of the alignment length
     If there are no valid alignments (or no alignments at all), return None. 
@@ -111,6 +115,8 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
         if not aln.aligned:                             continue
         startpos = get_aln_startpos_from_CIGAR(aln.cigar)
         if startpos not in allowed_start_positions:     continue
+        ref_startpos = [c for c in aln.cigar if c.type=='M'][0].ref_iv.start + 1
+        if ref_startpos > max_allowed_cassette_start:     continue
         aln_len = get_aln_len_from_CIGAR(len(aln.read), aln.cigar)
         if aln_len < min_cassette_length:               continue
         edit_dist = aln.optional_field('NM')
@@ -119,10 +125,10 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
     if not filtered_alignments:
         return None
     # now try to find a single best alignment based on a ranked list of criteria; if there are multiple best, error.
-    # NOTE that this should actually never be necessary, because it turns out that bowtie2 only returns all DISTINCT alignments, 
+    # NOTE that this should actually almost never be necessary, because bowtie2 only returns all DISTINCT alignments, 
     #   meaning ones that don't align the same read base to the same ref base - so to get multiple post-filter alns here, 
-    #   the read would have to have alignments to two different ref areas both starting at read position 22-24,
-    #   which is going to be impossible unless the alignments are only a few bp or the expected cassette seq is repetitive.
+    #   the read would have to have alignments to two different cassette areas, 
+    #   but if both the read alignment start and the cassette alignment start are constrained to a few bp, this is impossible.
     max_score = max(aln.optional_field('AS') for aln in filtered_alignments)
     filtered_alignments = [aln for aln in filtered_alignments if aln.optional_field('AS') == max_score]
     if len(filtered_alignments) == 1:
@@ -139,7 +145,7 @@ def choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_
 
 
 def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, min_cassette_length, max_percent_errors, 
-                             N_trim_start=0, N_trim_end=0, quiet=False):
+                             max_allowed_cassette_start, N_trim_start=0, N_trim_end=0, quiet=False):
     """ 
     Parse bowtie2 output file to separate infile seqs into IB,cassette,flank triples (or untrimmed cases)
     
@@ -169,7 +175,8 @@ def parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_le
                     if DEBUG: print name
                     # bowtie output will have multiple alignments per sequence - need to pick the best one.
                     allowed_start_positions = [x-N_trim_start+1 for x in allowed_IB_lengths]    # +1 to make them 1-based
-                    aln = choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors)
+                    aln = choose_best_alignment(alignment_list, allowed_start_positions, min_cassette_length, max_percent_errors, 
+                                                max_allowed_cassette_start)
                     if DEBUG: print aln
                     if aln is None:
                         results_N_unstripped += 1
@@ -243,7 +250,8 @@ def main(args, options):
         if not os.path.exists(bowtie_outfile):
             raise CassetteStrippingError("\n\nERROR: bowtie failed!\n%s  %s  %s"%bowtie_output)
     output_summary = parse_cassette_alignment(infile, bowtie_outfile, outfile_base, allowed_IB_lengths, options.min_cassette_length, 
-                                              options.max_percent_errors, N_ignore_start, options.N_ignore_end, options.quiet)
+                                              options.max_percent_errors, options.max_allowed_cassette_start, 
+                                              N_ignore_start, options.N_ignore_end, options.quiet)
 
 
 def do_test_run():
@@ -275,10 +283,10 @@ class Testing(unittest.TestCase):
     #       INPUT_strip_cassette_mism.fa DOESN'T, even though it has similar cases with a long mismatch - not sure why.
 
     def _run_test(self, infile, N_total, N_unstripped, IB_lengths, cassette_readlens, reflens=None, refstartpos=None, 
-                  total_errors=0, allowed_IB_lengths=[21,22,23], min_cass_len=10, max_percent_error=30):
+                  total_errors=0, allowed_IB_lengths=[21,22,23], min_cass_len=10, max_percent_error=30, max_start=5):
         bowtie_output = run_bowtie(infile, 'test_data/tmp.sam', 'expected-cassette-end_CIB1-3p', 20, 30, 1, "-f")
         output_summary = parse_cassette_alignment(infile, 'test_data/tmp.sam', 'test_data/tmp', 
-                                                  allowed_IB_lengths, min_cass_len, max_percent_error, 20, 30, True)
+                                                  allowed_IB_lengths, min_cass_len, max_percent_error, max_start, 20, 30, True)
         (total_seqs, results_N_unstripped, results_IB_lengths, results_cassette_read_lengths, results_reflengths,
          results_refstartpos, results_total_readlen, results_total_errors) = output_summary
         if reflens is None: 
@@ -338,6 +346,12 @@ class Testing(unittest.TestCase):
                        cassette_readlens = {45: 3, 44: 1, 43: 1, 22: 1, 16: 1}, reflens = None, 
                        refstartpos = {1: 6, 2: 1}, total_errors = 3,
                        max_percent_error=3)
+        # try different max_allowed_cassette_start values
+        self._run_test(Testing.infile2, 
+                       N_total = 9, N_unstripped = 1, IB_lengths = {22: 8}, 
+                       cassette_readlens = {45: 5, 43: 1, 22: 1, 16: 1}, reflens = None, 
+                       refstartpos = {1: 8}, total_errors = 15, 
+                       max_start=1)
         # not testing infile3 and infile4 - they have detailed tests, and all the summary stuff has already been tested here.
 
 

@@ -18,9 +18,11 @@ import basic_seq_utilities
 import general_utilities
 import deepseq_utilities
 
-# to see how I figured out the default bowtie options, see ~//experiments/arrayed_library/1504_trying_new_cassette-trimming/notes.txt
+# to see how I figured out the default bowtie options, see ~/experiments/arrayed_library/1504_trying_new_cassette-trimming/notes.txt
 DEFAULT_BOWTIE_OPTIONS = "--local --all --ma 3 --mp 5,5 --np 1 --rdg 5,3 --rfg 4,3 --score-min C,20,0 -N0 -L5 -i C,1,0 -R5 -D30 --norc --reorder"
+# another possibly good score set based on that file is match=12, mismatch=23, read_gap=20, read_ext=10, ref_gap=17, ref_ext=10, score_min=80?  This may be better at avoiding multiple alignments with same scores?
 # this is REALLY WEIRD, but for some reason if I put "-N0 -L5" in the options it works, but in the other order "-L5 -N0" it doesn't work on the same test sequences... (truncated_20bp_cassette in test_data/INPUT_strip_cassette.fa)
+
 
 DEBUG = 0
 
